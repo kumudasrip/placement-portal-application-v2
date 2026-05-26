@@ -21,3 +21,18 @@ class User(db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+class Company(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    hr_contact = db.Column(db.String(120))
+    company_email = db.Column(db.String(120))
+    website = db.Column(db.String(120))
+    industry = db.Column(db.String(120))
+    location = db.Column(db.String(120))
+    registration_number = db.Column(db.String(120))
+    approval_status = db.Column(db.String(20), default='pending')
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    drives = db.relationship('PlacementDrive', backref='company', lazy=True)
