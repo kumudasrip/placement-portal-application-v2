@@ -27,11 +27,11 @@ celery.conf.update(
     beat_schedule={
         "send-monthly-placement-report": {
             "task": "send_monthly_placement_report",
-            "schedule": crontab(day_of_month=1, hour=0, minute=0),  
+            "schedule": crontab(day_of_month=1, hour=0, minute=0),
         },
         "send-daily-visit-reminders": {
             "task": "send_visit_reminders",
-            "schedule": crontab(hour=9, minute=0),  
+            "schedule": crontab(hour=9, minute=0),
         },
     },
 )
@@ -43,7 +43,9 @@ def create_app():
     flask_app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///ppa.db"
     flask_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     flask_app.config["JWT_SECRET_KEY"] = "jwt-secret-key"
-    
+    flask_app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  
+    flask_app.config["UPLOAD_FOLDER"] = "uploads"
+    os.makedirs(flask_app.config["UPLOAD_FOLDER"], exist_ok=True)
     flask_app.config["MAIL_SERVER"] = "localhost"
     flask_app.config["MAIL_PORT"] = 1025
     flask_app.config["MAIL_USE_TLS"] = False
