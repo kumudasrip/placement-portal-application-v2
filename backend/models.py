@@ -55,6 +55,7 @@ class Student(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     is_blacklisted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    applications = db.relationship('Application', backref='student', lazy=True)
 
 class PlacementDrive(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -69,6 +70,7 @@ class PlacementDrive(db.Model):
     application_deadline = db.Column(db.DateTime)
     status = db.Column(db.String(20), default='pending') 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    applications = db.relationship('Application', backref='drive', lazy=True)
 
 class Application(db.Model):
     id = db.Column(db.Integer, primary_key=True)
