@@ -39,7 +39,7 @@ celery.conf.update(
 
 def create_app():
     flask_app = Flask(__name__)
-    flask_app.config["SECRET_KEY"] = "super-secret-key"
+    flask_app.config["SECRET_KEY"] = "24f3000060"
     flask_app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///ppa.db"
     flask_app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     flask_app.config["JWT_SECRET_KEY"] = "jwt-secret-key"
@@ -50,7 +50,7 @@ def create_app():
     flask_app.config["MAIL_USE_SSL"] = False
     flask_app.config["MAIL_USERNAME"] = None
     flask_app.config["MAIL_PASSWORD"] = None
-    flask_app.config["MAIL_DEFAULT_SENDER"] = ("PPA", "noreply@ppa.local")
+    flask_app.config["MAIL_DEFAULT_SENDER"] = ("PPA", "noreply@ppa.com")
     
     CORS(flask_app, resources={r"/*": {
         "origins": "*",
@@ -102,8 +102,30 @@ def create_app():
     global _flask_app
     _flask_app = flask_app
     
-    return flask_app
+    with flask_app.app_context():
+        db.create_all()
+        try:
+            if not User.query.filter_by(role="admin").first():
+                admin_email = "admin@ppa.com"
+                admin_password = "admin123"
+                hashed = generate_password_hash(admin_password, method="pbkdf2:sha256")
+                admin = User(username="admin", email=admin_email, password_hash=hashed, role="admin")
+                db.session.add(admin)
+                db.session.commit()
+                flask_app.logger.info(f"Admin user '{admin_email}' created.")
+            else:
+                flask_app.logger.info("Admin user already exists.")
+        except Exception as e:
+            flask_app.logger.error(f"Error creating admin user: {e}")
+            db.session.rollback()
+    
+    from routes import register_routes
+    register_routes(flask_app, db, jwt, mail, cache, celery)
+    
+    from tasks import register_tasks
+    register_tasks(celery, mail)
 
+    return flask_app
 
 if __name__ == "__main__":
     app = create_app()
