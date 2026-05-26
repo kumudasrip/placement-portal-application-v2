@@ -69,3 +69,11 @@ class PlacementDrive(db.Model):
     application_deadline = db.Column(db.DateTime)
     status = db.Column(db.String(20), default='pending') 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Application(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('student.id'), nullable=False)
+    drive_id = db.Column(db.Integer, db.ForeignKey('placement_drive.id'), nullable=False)
+    application_date = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='applied') 
+    feedback = db.Column(db.Text)
