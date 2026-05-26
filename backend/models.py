@@ -55,3 +55,17 @@ class Student(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     is_blacklisted = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class PlacementDrive(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('company.id'), nullable=False)
+    job_title = db.Column(db.String(120), nullable=False)
+    job_description = db.Column(db.Text)
+    eligibility_criteria = db.Column(db.String(256))
+    skills_required = db.Column(db.String(256))
+    salary = db.Column(db.String(64))
+    location = db.Column(db.String(120))
+    num_positions = db.Column(db.Integer, default=1)
+    application_deadline = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='pending') 
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
