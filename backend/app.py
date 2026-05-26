@@ -59,6 +59,45 @@ def create_app():
         "expose_headers": ["Content-Type", "Authorization"],
         "max_age": 3600
     }})
+
+    try:
+        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.ping()
+        flask_app.config["CACHE_TYPE"] = "redis"
+        flask_app.config["CACHE_REDIS_HOST"] = "localhost"
+        flask_app.config["CACHE_REDIS_PORT"] = 6379
+        flask_app.config["CACHE_REDIS_DB"] = 0
+        flask_app.config["CACHE_DEFAULT_TIMEOUT"] = 300
+        flask_app.logger.info("Using Redis cache")
+    except Exception as e:
+        flask_app.config["CACHE_TYPE"] = "simple"
+        flask_app.config["CACHE_DEFAULT_TIMEOUT"] = 300
+        flask_app.logger.info(f"Redis not available, using SimpleCache: {e}")
+    
+    broker_url = "redis://localhost:6379/1"
+    result_backend = "redis://localhost:6379/1"
+    
+    celery.conf.update(
+        broker_url=broker_url,
+        result_backend=result_backend,
+    )
+    flask_app.config["CELERY_BROKER_URL"] = broker_url
+    flask_app.config["CELERY_RESULT_BACKEND"] = result_backend
+    
+    db.init_app(flask_app)
+    jwt.init_app(flask_app)
+    mail.init_app(flask_app)
+    cache.init_app(flask_app)
+    
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            global _flask_app
+            if _flask_app:
+                with _flask_app.app_context():
+                    return self.run(*args, **kwargs)
+            else:
+                return self.run(*args, **kwargs)
+    celery.Task = ContextTask
     
     global _flask_app
     _flask_app = flask_app
