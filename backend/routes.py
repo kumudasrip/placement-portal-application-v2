@@ -35,3 +35,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
     @jwt.unauthorized_loader
     def missing_token_callback(error):
         return jsonify({'msg': 'Missing authorization token'}), 401
+
+    def get_role():
+        claims = get_jwt()
+        return claims.get('role')
+    
+    def get_user_id():
+        return int(get_jwt_identity())
