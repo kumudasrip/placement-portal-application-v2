@@ -175,3 +175,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.commit()
         cache.clear()
         return jsonify({'msg': 'Company unblacklisted'})
+
+    @app.route('/api/admin/students', methods=['GET'])
+    @jwt_required()
+    @cache.cached(timeout=300, query_string=True)
+    def admin_list_students():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        search = request.args.get('search', '')
+        query = Student.query
+        if search:
+            query = query.filter((Student.name.ilike(f'%{search}%')) | (Student.department.ilike(f'%{search}%')) | (Student.user.has(User.email.ilike(f'%{search}%'))))
+        students = query.all()
+        return jsonify([{'id': s.id, 'name': s.name, 'department': s.department, 'is_active': s.is_active, 'is_blacklisted': s.user.is_blacklisted, 'email': s.user.email} for s in students])
