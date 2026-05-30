@@ -151,3 +151,15 @@ def register_routes(app, db, jwt, mail, cache, celery):
         cache.clear()
         send_mail(company.user.email, 'Company Rejected', 'Your company registration was rejected.')
         return jsonify({'msg': 'Company rejected'})
+
+    @app.route('/api/admin/companies/<int:company_id>/blacklist', methods=['POST'])
+    @jwt_required()
+    def admin_blacklist_company(company_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.get_or_404(company_id)
+        company.is_active = False
+        company.user.is_blacklisted = True
+        db.session.commit()
+        cache.clear()
+        return jsonify({'msg': 'Company blacklisted'})
