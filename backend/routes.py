@@ -42,3 +42,27 @@ def register_routes(app, db, jwt, mail, cache, celery):
     
     def get_user_id():
         return int(get_jwt_identity())
+
+    @app.route('/api/register/student', methods=['POST'])
+    def register_student():
+        data = request.json
+        if User.query.filter((User.username == data['username']) | (User.email == data['email'])).first():
+            return jsonify({'msg': 'Username or email already exists'}), 400
+        user = User(username=data['username'], email=data['email'], role='student')
+        user.set_password(data['password'])
+        db.session.add(user)
+        db.session.commit()
+        student = Student(
+            user_id=user.id,
+            name=data.get('name', data['username']),
+            phone_number=data.get('phone_number'),
+            college_name=data.get('college_name'),
+            degree=data.get('degree'),
+            department=data.get('department'),
+            cgpa=data.get('cgpa'),
+            year=data.get('year'),
+            location=data.get('location')
+        )
+        db.session.add(student)
+        db.session.commit()
+        return jsonify({'msg': 'Student registered successfully'})
