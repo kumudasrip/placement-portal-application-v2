@@ -188,3 +188,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
             query = query.filter((Student.name.ilike(f'%{search}%')) | (Student.department.ilike(f'%{search}%')) | (Student.user.has(User.email.ilike(f'%{search}%'))))
         students = query.all()
         return jsonify([{'id': s.id, 'name': s.name, 'department': s.department, 'is_active': s.is_active, 'is_blacklisted': s.user.is_blacklisted, 'email': s.user.email} for s in students])
+
+    @app.route('/api/admin/students/<int:student_id>/blacklist', methods=['POST'])
+    @jwt_required()
+    def admin_blacklist_student(student_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.get_or_404(student_id)
+        student.is_active = False
+        student.is_blacklisted = True
+        student.user.is_blacklisted = True
+        db.session.commit()
+        cache.clear()
+        return jsonify({'msg': 'Student blacklisted'})
