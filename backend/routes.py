@@ -105,3 +105,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'drives': PlacementDrive.query.count(),
             'applications': Application.query.count()
         })
+
+    @app.route('/api/admin/companies', methods=['GET'])
+    @jwt_required()
+    @cache.cached(timeout=300, query_string=True)
+    def admin_list_companies():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        search = request.args.get('search', '')
+        query = Company.query
+        if search:
+            query = query.filter((Company.name.ilike(f'%{search}%')) | (Company.industry.ilike(f'%{search}%')))
+        companies = query.all()
+        return jsonify([{'id': c.id, 'name': c.name, 'status': c.approval_status, 'is_active': c.is_active, 'is_blacklisted': c.user.is_blacklisted, 'industry': c.industry} for c in companies])
