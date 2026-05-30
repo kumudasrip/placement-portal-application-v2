@@ -118,3 +118,22 @@ def register_routes(app, db, jwt, mail, cache, celery):
             query = query.filter((Company.name.ilike(f'%{search}%')) | (Company.industry.ilike(f'%{search}%')))
         companies = query.all()
         return jsonify([{'id': c.id, 'name': c.name, 'status': c.approval_status, 'is_active': c.is_active, 'is_blacklisted': c.user.is_blacklisted, 'industry': c.industry} for c in companies])
+
+    @app.route('/api/admin/companies/<int:company_id>/approve', methods=['POST'])
+    @jwt_required()
+    def admin_approve_company(company_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.get_or_404(company_id)
+        if company.approval_status != 'pending':
+            return jsonify({'msg': f'Company already {company.approval_status}. Cannot approve.'}), 400
+        company.approval_status = 'approved'
+        db.session.commit()
+        cache.clear()
+        send_enhanced_mail(
+            company.user.email,
+            'Company Approved',
+            'company_approved',
+            company_name=company.name
+        )
+        return jsonify({'msg': 'Company approved'})
