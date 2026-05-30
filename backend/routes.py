@@ -137,3 +137,17 @@ def register_routes(app, db, jwt, mail, cache, celery):
             company_name=company.name
         )
         return jsonify({'msg': 'Company approved'})
+
+    @app.route('/api/admin/companies/<int:company_id>/reject', methods=['POST'])
+    @jwt_required()
+    def admin_reject_company(company_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.get_or_404(company_id)
+        if company.approval_status != 'pending':
+            return jsonify({'msg': f'Company already {company.approval_status}. Cannot reject.'}), 400
+        company.approval_status = 'rejected'
+        db.session.commit()
+        cache.clear()
+        send_mail(company.user.email, 'Company Rejected', 'Your company registration was rejected.')
+        return jsonify({'msg': 'Company rejected'})
