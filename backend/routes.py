@@ -80,3 +80,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.add(company)
         db.session.commit()
         return jsonify({'msg': 'Company registered, pending admin approval'})
+
+    @app.route('/api/login', methods=['POST'])
+    def login():
+        data = request.json
+        user = User.query.filter_by(username=data['username']).first()
+        if not user or not user.check_password(data['password']):
+            return jsonify({'msg': 'Invalid credentials'}), 401
+        if not user.is_active or user.is_blacklisted:
+            return jsonify({'msg': 'Account is inactive or blacklisted'}), 403
+        if user.role == 'company' and (not user.company or user.company.approval_status != 'approved'):
+            return jsonify({'msg': 'Company not approved yet'}), 403
+        access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
+        return jsonify({'access_token': access_token, 'role': user.role, 'user_id': user.id})
