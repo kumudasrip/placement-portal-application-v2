@@ -266,3 +266,63 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if not os.path.exists(resume_path):
             return jsonify({'msg': 'Resume file not found'}), 404
         return send_file(resume_path, as_attachment=True)
+
+    @app.route('/api/admin/companies/<int:company_id>', methods=['GET'])
+    @jwt_required()
+    def admin_get_company_detail(company_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.get_or_404(company_id)
+        user = User.query.get(company.user_id)
+        drives = PlacementDrive.query.filter_by(company_id=company.id).all()
+        
+        drives_data = []
+        for drive in drives:
+            total_applicants = Application.query.filter_by(drive_id=drive.id).count()
+            drives_data.append({
+                'id': drive.id,
+                'job_title': drive.job_title,
+                'status': drive.status,
+                'applicants': total_applicants,
+                'deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None
+            })
+        
+        return jsonify({
+            'id': company.id,
+            'name': company.name,
+            'email': user.email,
+            'company_email': company.company_email,
+            'hr_contact': company.hr_contact,
+            'website': company.website,
+            'industry': company.industry,
+            'location': company.location,
+            'registration_number': company.registration_number,
+            'approval_status': company.approval_status,
+            'is_active': company.is_active,
+            'is_blacklisted': user.is_blacklisted,
+            'created_at': company.created_at.strftime('%Y-%m-%d'),
+            'drives_count': len(drives_data),
+            'drives': drives_data
+        })
+
+    @app.route('/api/admin/drives', methods=['GET'])
+    @jwt_required()
+    def admin_list_drives():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        search = request.args.get('search', '')
+        try:
+            page = int(request.args.get('page', 1))
+            per_page = int(request.args.get('per_page', 20))
+        except ValueError:
+            page = 1
+            per_page = 20
+        query = PlacementDrive.query.join(Company)
+        if search:
+            like = f"%{search}%"
+            query = query.filter((PlacementDrive.job_title.ilike(like)) | (Company.name.ilike(like)) | (Company.industry.ilike(like)))
+
+        total = query.count()
+        items = query.order_by(PlacementDrive.id.desc()).limit(per_page).offset((page - 1) * per_page).all()
+        drives = [{'id': d.id, 'title': d.job_title, 'company': d.company.name, 'status': d.status} for d in items]
+        return jsonify({'items': drives, 'total': total, 'page': page, 'per_page': per_page})
