@@ -214,3 +214,42 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.commit()
         cache.clear()
         return jsonify({'msg': 'Student unblacklisted'})
+
+    @app.route('/api/admin/students/<int:student_id>', methods=['GET'])
+    @jwt_required()
+    def admin_get_student_detail(student_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.get_or_404(student_id)
+        user = User.query.get(student.user_id)
+        applications = Application.query.filter_by(student_id=student.id).all()
+        
+        return jsonify({
+            'id': student.id,
+            'name': student.name,
+            'email': user.email,
+            'phone_number': student.phone_number,
+            'college_name': student.college_name,
+            'degree': student.degree,
+            'department': student.department,
+            'cgpa': student.cgpa,
+            'year': student.year,
+            'location': student.location,
+            'skills': student.skills,
+            'education': student.education,
+            'experience': student.experience,
+            'resume': student.resume,
+            'is_active': student.is_active,
+            'is_blacklisted': student.is_blacklisted,
+            'created_at': student.created_at.strftime('%Y-%m-%d'),
+            'applications_count': len(applications),
+            'applications': [
+                {
+                    'id': a.id,
+                    'drive': a.drive.job_title,
+                    'company': a.drive.company.name,
+                    'status': a.status,
+                    'date': a.application_date.strftime('%Y-%m-%d')
+                } for a in applications
+            ]
+        })
