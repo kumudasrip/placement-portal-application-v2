@@ -66,3 +66,17 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.add(student)
         db.session.commit()
         return jsonify({'msg': 'Student registered successfully'})
+
+    @app.route('/api/register/company', methods=['POST'])
+    def register_company():
+        data = request.json
+        if User.query.filter((User.username == data['username']) | (User.email == data['email'])).first():
+            return jsonify({'msg': 'Username or email already exists'}), 400
+        user = User(username=data['username'], email=data['email'], role='company')
+        user.set_password(data['password'])
+        db.session.add(user)
+        db.session.commit()
+        company = Company(user_id=user.id, name=data.get('name', data['username']), hr_contact=data.get('hr_contact'), website=data.get('website'), industry=data.get('industry'), location=data.get('location'))
+        db.session.add(company)
+        db.session.commit()
+        return jsonify({'msg': 'Company registered, pending admin approval'})
