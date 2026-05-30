@@ -201,3 +201,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.commit()
         cache.clear()
         return jsonify({'msg': 'Student blacklisted'})
+
+    @app.route('/api/admin/students/<int:student_id>/unblacklist', methods=['POST'])
+    @jwt_required()
+    def admin_unblacklist_student(student_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.get_or_404(student_id)
+        student.is_active = True
+        student.is_blacklisted = False
+        student.user.is_blacklisted = False
+        db.session.commit()
+        cache.clear()
+        return jsonify({'msg': 'Student unblacklisted'})
