@@ -93,3 +93,15 @@ def register_routes(app, db, jwt, mail, cache, celery):
             return jsonify({'msg': 'Company not approved yet'}), 403
         access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
         return jsonify({'access_token': access_token, 'role': user.role, 'user_id': user.id})
+
+    @app.route('/api/admin/summary', methods=['GET'])
+    @jwt_required()
+    def admin_summary():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        return jsonify({
+            'students': Student.query.count(),
+            'companies': Company.query.count(),
+            'drives': PlacementDrive.query.count(),
+            'applications': Application.query.count()
+        })
