@@ -326,3 +326,76 @@ def register_routes(app, db, jwt, mail, cache, celery):
         items = query.order_by(PlacementDrive.id.desc()).limit(per_page).offset((page - 1) * per_page).all()
         drives = [{'id': d.id, 'title': d.job_title, 'company': d.company.name, 'status': d.status} for d in items]
         return jsonify({'items': drives, 'total': total, 'page': page, 'per_page': per_page})
+
+    @app.route('/api/admin/drives/<int:drive_id>/approve', methods=['POST'])
+    @jwt_required()
+    def admin_approve_drive(drive_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.status != 'pending':
+            return jsonify({'msg': f'Drive already {drive.status}. Cannot approve.'}), 400
+        drive.status = 'approved'
+        db.session.commit()
+        cache.clear()
+        send_enhanced_mail(
+            drive.company.user.email,
+            f'Drive Approved - {drive.job_title}',
+            'drive_approved',
+            company_name=drive.company.name,
+            drive_title=drive.job_title,
+            salary=drive.salary,
+            deadline=drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else 'N/A'
+        )
+        return jsonify({'msg': 'Drive approved'})
+
+    @app.route('/api/admin/drives/<int:drive_id>/reject', methods=['POST'])
+    @jwt_required()
+    def admin_reject_drive(drive_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.status != 'pending':
+            return jsonify({'msg': f'Drive already {drive.status}. Cannot reject.'}), 400
+        drive.status = 'rejected'
+        db.session.commit()
+        cache.clear()
+        send_mail(drive.company.user.email, 'Drive Rejected', f'Your drive {drive.job_title} was rejected.')
+        return jsonify({'msg': 'Drive rejected'})
+
+    @app.route('/api/admin/drives/<int:drive_id>', methods=['GET'])
+    @jwt_required()
+    def admin_get_drive_detail(drive_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        applications = Application.query.filter_by(drive_id=drive.id).all()
+        
+        applications_data = []
+        for app in applications:
+            applications_data.append({
+                'id': app.id,
+                'student': app.student.name,
+                'student_email': app.student.user.email,
+                'status': app.status,
+                'date': app.application_date.strftime('%Y-%m-%d')
+            })
+        
+        return jsonify({
+            'id': drive.id,
+            'job_title': drive.job_title,
+            'job_description': drive.job_description,
+            'company_id': drive.company_id,
+            'company_name': drive.company.name,
+            'company_email': drive.company.company_email,
+            'eligibility_criteria': drive.eligibility_criteria,
+            'skills_required': drive.skills_required,
+            'salary': drive.salary,
+            'location': drive.location,
+            'num_positions': drive.num_positions,
+            'status': drive.status,
+            'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
+            'created_at': drive.created_at.strftime('%Y-%m-%d'),
+            'applications_count': len(applications_data),
+            'applications': applications_data
+        })
