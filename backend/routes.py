@@ -163,3 +163,15 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.commit()
         cache.clear()
         return jsonify({'msg': 'Company blacklisted'})
+
+    @app.route('/api/admin/companies/<int:company_id>/unblacklist', methods=['POST'])
+    @jwt_required()
+    def admin_unblacklist_company(company_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.get_or_404(company_id)
+        company.is_active = True
+        company.user.is_blacklisted = False
+        db.session.commit()
+        cache.clear()
+        return jsonify({'msg': 'Company unblacklisted'})
