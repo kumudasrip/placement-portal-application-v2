@@ -253,3 +253,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
                 } for a in applications
             ]
         })
+
+    @app.route('/api/admin/students/<int:student_id>/download_resume', methods=['GET'])
+    @jwt_required()
+    def admin_download_student_resume(student_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.get_or_404(student_id)
+        if not student.resume:
+            return jsonify({'msg': 'Resume not found'}), 404
+        resume_path = os.path.join(UPLOAD_FOLDER, student.resume)
+        if not os.path.exists(resume_path):
+            return jsonify({'msg': 'Resume file not found'}), 404
+        return send_file(resume_path, as_attachment=True)
