@@ -399,3 +399,108 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'applications_count': len(applications_data),
             'applications': applications_data
         })
+
+    @app.route('/api/admin/applications', methods=['GET'])
+    @jwt_required()
+    def admin_list_applications():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        search = request.args.get('search', '')
+        try:
+            page = int(request.args.get('page', 1))
+            per_page = int(request.args.get('per_page', 20))
+        except ValueError:
+            page = 1
+            per_page = 20
+
+        query = Application.query.join(Student).join(PlacementDrive).join(Company)
+        if search:
+            like = f"%{search}%"
+            query = query.filter(
+                (Student.name.ilike(like)) |
+                (Company.name.ilike(like)) |
+                (PlacementDrive.job_title.ilike(like)) |
+                (Student.user.has(User.email.ilike(like))) |
+                (Application.status.ilike(like))
+            )
+
+        total = query.count()
+        items = query.order_by(Application.id.desc()).limit(per_page).offset((page - 1) * per_page).all()
+        apps = []
+        for a in items:
+            apps.append({
+                'id': a.id,
+                'student': a.student.name,
+                'student_email': a.student.user.email,
+                'company': a.drive.company.name,
+                'drive': a.drive.job_title,
+                'status': a.status,
+                'date': a.application_date.strftime('%Y-%m-%d')
+            })
+        return jsonify({'items': apps, 'total': total, 'page': page, 'per_page': per_page})
+
+    @app.route('/api/admin/applications/<int:application_id>', methods=['GET'])
+    @jwt_required()
+    def admin_get_application_detail(application_id):
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        application = Application.query.get_or_404(application_id)
+        
+        return jsonify({
+            'id': application.id,
+            'student_id': application.student_id,
+            'student_name': application.student.name,
+            'student_email': application.student.user.email,
+            'student_cgpa': application.student.cgpa,
+            'student_department': application.student.department,
+            'student_year': application.student.year,
+            'drive_id': application.drive_id,
+            'drive_title': application.drive.job_title,
+            'company_id': application.drive.company_id,
+            'company_name': application.drive.company.name,
+            'status': application.status,
+            'feedback': application.feedback,
+            'application_date': application.application_date.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    @app.route('/api/admin/search', methods=['GET'])
+    @jwt_required()
+    def admin_unified_search():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        search = request.args.get('q', '').strip()
+        if not search:
+            return jsonify({'students': [], 'companies': [], 'drives': [], 'applications': []})
+        
+        like = f"%{search}%"
+        students = Student.query.filter(
+            (Student.name.ilike(like)) | 
+            (Student.department.ilike(like)) | 
+            (Student.user.has(User.email.ilike(like)))
+        ).limit(10).all()
+
+        companies = Company.query.filter(
+            (Company.name.ilike(like)) | 
+            (Company.industry.ilike(like)) |
+            (Company.location.ilike(like))
+        ).limit(10).all()
+
+        drives = PlacementDrive.query.join(Company).filter(
+            (PlacementDrive.job_title.ilike(like)) | 
+            (Company.name.ilike(like))
+        ).limit(10).all()
+        
+        applications = Application.query.join(Student).join(PlacementDrive).join(Company).filter(
+            (Student.name.ilike(like)) |
+            (Company.name.ilike(like)) |
+            (PlacementDrive.job_title.ilike(like)) |
+            (Student.user.has(User.email.ilike(like))) |
+            (Application.status.ilike(like))
+        ).limit(10).all()
+        
+        return jsonify({
+            'students': [{'id': s.id, 'name': s.name, 'email': s.user.email, 'type': 'student'} for s in students],
+            'companies': [{'id': c.id, 'name': c.name, 'industry': c.industry, 'type': 'company'} for c in companies],
+            'drives': [{'id': d.id, 'title': d.job_title, 'company': d.company.name, 'type': 'drive'} for d in drives],
+            'applications': [{'id': a.id, 'student': a.student.name, 'company': a.drive.company.name, 'drive': a.drive.job_title, 'type': 'application'} for a in applications]
+        })
