@@ -504,3 +504,201 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'drives': [{'id': d.id, 'title': d.job_title, 'company': d.company.name, 'type': 'drive'} for d in drives],
             'applications': [{'id': a.id, 'student': a.student.name, 'company': a.drive.company.name, 'drive': a.drive.job_title, 'type': 'application'} for a in applications]
         })
+
+    @app.route('/api/company/summary', methods=['GET'])
+    @jwt_required()
+    def company_summary():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        drives = PlacementDrive.query.filter_by(company_id=company.id).all()
+        return jsonify({
+            'company': company.name,
+            'drives': [{'id': d.id, 'title': d.job_title, 'status': d.status} for d in drives]
+        })
+
+    @app.route('/api/company/dashboard', methods=['GET'])
+    @jwt_required()
+    def company_dashboard():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        if not company:
+            return jsonify({'msg': 'Company not found'}), 404
+        
+        user = User.query.get(get_user_id())
+        drives = PlacementDrive.query.filter_by(company_id=company.id).all()
+        drives_data = []
+        for drive in drives:
+            total_applicants = Application.query.filter_by(drive_id=drive.id).count()
+            approved_applicants = Application.query.filter_by(drive_id=drive.id, status='selected').count()
+            drives_data.append({
+                'id': drive.id,
+                'job_title': drive.job_title,
+                'status': drive.status,
+                'total_applicants': total_applicants,
+                'approved_applicants': approved_applicants,
+                'salary': drive.salary,
+                'location': drive.location,
+                'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
+                'created_at': drive.created_at.strftime('%Y-%m-%d')
+            })
+        
+        return jsonify({
+            'company': {
+                'id': company.id,
+                'name': company.name,
+                'email': user.email,
+                'company_email': company.company_email,
+                'hr_contact': company.hr_contact,
+                'website': company.website,
+                'industry': company.industry,
+                'location': company.location,
+                'registration_number': company.registration_number,
+                'approval_status': company.approval_status,
+                'created_at': company.created_at.strftime('%Y-%m-%d')
+            },
+            'drives': drives_data,
+            'total_drives': len(drives_data)
+        })
+
+    @app.route('/api/company/drives', methods=['POST'])
+    @jwt_required()
+    def company_create_drive():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        data = request.json
+        drive = PlacementDrive(
+            company_id=company.id,
+            job_title=data['job_title'],
+            job_description=data.get('job_description'),
+            eligibility_criteria=data.get('eligibility_criteria'),
+            salary=data.get('salary'),
+            location=data.get('location'),
+            application_deadline=datetime.strptime(data['application_deadline'], '%Y-%m-%d'),
+            status='pending'
+        )
+        db.session.add(drive)
+        db.session.commit()
+        return jsonify({'msg': 'Drive created, pending admin approval'})
+
+    @app.route('/api/company/drives', methods=['GET'])
+    @jwt_required()
+    def company_list_drives():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        drives = PlacementDrive.query.filter_by(company_id=company.id).all()
+        return jsonify([{'id': d.id, 'title': d.job_title, 'status': d.status} for d in drives])
+
+    @app.route('/api/company/drives/<int:drive_id>/status', methods=['PUT'])
+    @jwt_required()
+    def company_update_drive_status(drive_id):
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.company.user_id != get_user_id():
+            return jsonify({'msg': 'Unauthorized'}), 403
+        data = request.json
+        new_status = data.get('status')
+        if new_status not in ['active', 'closed']:
+            return jsonify({'msg': 'Invalid status. Use "active" or "closed"'}), 400
+        if new_status == 'active':
+            drive.status = 'approved'  
+        else: 
+            drive.status = 'closed' 
+        
+        db.session.commit()
+        cache.clear()
+        return jsonify({'msg': f'Drive marked as {new_status}', 'status': drive.status})
+
+    @app.route('/api/company/drives/<int:drive_id>/applications', methods=['GET'])
+    @jwt_required()
+    def company_drive_applications(drive_id):
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.company.user_id != get_user_id():
+            return jsonify({'msg': 'Unauthorized'}), 403
+        applications = Application.query.filter_by(drive_id=drive.id).all()
+        return jsonify([
+            {'id': a.id, 'student': a.student.name, 'status': a.status, 'date': a.application_date.strftime('%Y-%m-%d')} for a in applications
+        ])
+
+    @app.route('/api/company/applications/<int:application_id>/student', methods=['GET'])
+    @jwt_required()
+    def company_get_applicant_profile(application_id):
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        application = Application.query.get_or_404(application_id)
+        drive = PlacementDrive.query.get(application.drive_id)
+        if drive.company.user_id != get_user_id():
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = application.student
+        user = User.query.get(student.user_id)
+        profile = {
+            'id': student.id,
+            'name': student.name,
+            'email': user.email,
+            'phone_number': student.phone_number,
+            'college_name': student.college_name,
+            'degree': student.degree,
+            'department': student.department,
+            'cgpa': student.cgpa,
+            'year': student.year,
+            'location': student.location,
+            'education': student.education,
+            'experience': student.experience,
+            'skills': student.skills,
+            'resume': student.resume,
+            'is_active': student.is_active,
+            'created_at': student.created_at.strftime('%Y-%m-%d') if student.created_at else None,
+            'application': {
+                'id': application.id,
+                'status': application.status,
+                'application_date': application.application_date.strftime('%Y-%m-%d') if application.application_date else None,
+                'feedback': application.feedback
+            }
+        }
+        return jsonify(profile)
+
+    @app.route('/api/company/applications/<int:application_id>/student_resume', methods=['GET'])
+    @jwt_required()
+    def company_download_applicant_resume(application_id):
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        application = Application.query.get_or_404(application_id)
+        drive = PlacementDrive.query.get(application.drive_id)
+        if drive.company.user_id != get_user_id():
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = application.student
+        if not student or not student.resume:
+            return jsonify({'msg': 'Resume not found'}), 404
+        resume_path = os.path.join(UPLOAD_FOLDER, student.resume)
+        if not os.path.exists(resume_path):
+            return jsonify({'msg': 'Resume file not found'}), 404
+        return send_file(resume_path, as_attachment=True)
+
+    @app.route('/api/company/applications/<int:application_id>/status', methods=['POST'])
+    @jwt_required()
+    def company_update_application_status(application_id):
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        application = Application.query.get_or_404(application_id)
+        drive = PlacementDrive.query.get(application.drive_id)
+        if drive.company.user_id != get_user_id():
+            return jsonify({'msg': 'Unauthorized'}), 403
+        data = request.json
+        application.status = data['status']
+        application.feedback = data.get('feedback')
+        db.session.commit()
+
+        email_subject = 'Application Status Updated'
+        email_body = f'Your application status for {drive.job_title} is now {application.status.upper()}.'
+        if data.get('date'):
+            email_body += f'\n\nDate: {data.get("date")}'
+        if data.get('feedback'):
+            email_body += f'\n\nDetails: {data.get("feedback")}'
+        send_mail(application.student.user.email, email_subject, email_body)
+        return jsonify({'msg': 'Application status updated'})
