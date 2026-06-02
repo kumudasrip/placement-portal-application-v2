@@ -702,3 +702,276 @@ def register_routes(app, db, jwt, mail, cache, celery):
             email_body += f'\n\nDetails: {data.get("feedback")}'
         send_mail(application.student.user.email, email_subject, email_body)
         return jsonify({'msg': 'Application status updated'})
+
+    @app.route('/api/student/summary', methods=['GET'])
+    @jwt_required()
+    def student_summary():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        applications = Application.query.filter_by(student_id=student.id).all()
+        return jsonify({
+            'student': student.name,
+            'applications': [{'id': a.id, 'drive': a.drive.job_title, 'status': a.status, 'date': a.application_date.strftime('%Y-%m-%d')} for a in applications]
+        })
+
+    @app.route('/api/student/drives', methods=['GET'])
+    @jwt_required()
+    @cache.cached(timeout=300, query_string=True)
+    def student_list_drives():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        drives = PlacementDrive.query.filter(
+            (PlacementDrive.status == 'approved') & 
+            (PlacementDrive.application_deadline >= datetime.utcnow())
+        ).all()
+        eligible_drives = []
+        for d in drives:
+            eligible_drives.append({
+                'id': d.id,
+                'title': d.job_title,
+                'company': d.company.name,
+                'company_id': d.company.id,
+                'deadline': d.application_deadline.strftime('%Y-%m-%d'),
+                'salary': d.salary,
+                'location': d.location
+            })
+        return jsonify(eligible_drives)
+
+    @app.route('/api/student/companies', methods=['GET'])
+    @jwt_required()
+    def student_search_companies():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        search = request.args.get('search', '').strip()
+        query = Company.query.filter(Company.approval_status == 'approved')
+        if search:
+            like = f"%{search}%"
+            query = query.filter(
+                (Company.name.ilike(like)) | 
+                (Company.industry.ilike(like)) |
+                (Company.location.ilike(like))
+            )
+        
+        companies = query.limit(20).all()
+        return jsonify([{
+            'id': c.id,
+            'name': c.name,
+            'industry': c.industry,
+            'location': c.location,
+            'website': c.website
+        } for c in companies])
+
+    @app.route('/api/student/companies/<int:company_id>', methods=['GET'])
+    @jwt_required()
+    def student_get_company_detail(company_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.get_or_404(company_id)
+        if company.approval_status != 'approved':
+            return jsonify({'msg': 'Company not available'}), 403
+        
+        drives = PlacementDrive.query.filter(
+            (PlacementDrive.company_id == company.id) &
+            (PlacementDrive.status == 'approved') &
+            (PlacementDrive.application_deadline >= datetime.utcnow())
+        ).all()
+        
+        drives_data = [{
+            'id': d.id,
+            'job_title': d.job_title,
+            'salary': d.salary,
+            'location': d.location,
+            'deadline': d.application_deadline.strftime('%Y-%m-%d') if d.application_deadline else None
+        } for d in drives]
+        return jsonify({
+            'id': company.id,
+            'name': company.name,
+            'industry': company.industry,
+            'location': company.location,
+            'website': company.website,
+            'hr_contact': company.hr_contact,
+            'company_email': company.company_email,
+            'active_drives': len(drives_data),
+            'drives': drives_data
+        })
+
+    @app.route('/api/student/drives/<int:drive_id>', methods=['GET'])
+    @jwt_required()
+    def student_get_drive_detail(drive_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.status != 'approved':
+            return jsonify({'msg': 'Drive not available'}), 403
+        
+        return jsonify({
+            'id': drive.id,
+            'job_title': drive.job_title,
+            'job_description': drive.job_description,
+            'company_name': drive.company.name,
+            'company_id': drive.company.id,
+            'eligibility_criteria': drive.eligibility_criteria,
+            'skills_required': drive.skills_required,
+            'salary': drive.salary,
+            'location': drive.location,
+            'num_positions': drive.num_positions,
+            'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
+            'status': drive.status,
+            'created_at': drive.created_at.strftime('%Y-%m-%d')
+        })
+
+    @app.route('/api/student/drives/<int:drive_id>/apply', methods=['POST'])
+    @jwt_required()
+    def student_apply_drive(drive_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if Application.query.filter_by(student_id=student.id, drive_id=drive.id).first():
+            return jsonify({'msg': 'Already applied'}), 400
+        application = Application(student_id=student.id, drive_id=drive.id)
+        db.session.add(application)
+        db.session.commit()
+        send_mail(student.user.email, 'Application Submitted', f'You have applied for {drive.job_title}.')
+        return jsonify({'msg': 'Applied successfully'})
+
+    @app.route('/api/student/applications', methods=['GET'])
+    @jwt_required()
+    def student_applications():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        applications = Application.query.filter_by(student_id=student.id).all()
+        return jsonify([
+            {'id': a.id, 'drive': a.drive.job_title, 'company': a.drive.company.name, 'status': a.status, 'date': a.application_date.strftime('%Y-%m-%d')} for a in applications
+        ])
+
+    @app.route('/api/student/export_applications', methods=['POST'])
+    @jwt_required()
+    def student_export_applications():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        from tasks import export_applications_to_csv
+        task = export_applications_to_csv.delay(student.id)
+        return jsonify({'msg': 'Export job queued', 'job_id': task.id, 'status': 'pending'})
+
+    @app.route('/api/student/export_status/<job_id>', methods=['GET'])
+    @jwt_required()
+    def student_export_status(job_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        result = celery.AsyncResult(job_id)
+        if result.state == 'PENDING':
+            return jsonify({'status': 'pending', 'msg': 'Job is queued'})
+        elif result.state == 'SUCCESS':
+            return jsonify({'status': 'completed', 'download_url': f'/api/student/download_export/{job_id}'})
+        elif result.state == 'FAILURE':
+            return jsonify({'status': 'failed', 'msg': str(result.info)})
+        else:
+            return jsonify({'status': result.state})
+
+    @app.route('/api/student/download_export/<job_id>', methods=['GET'])
+    @jwt_required()
+    def student_download_export(job_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        
+        result = celery.AsyncResult(job_id)
+        if result.state == 'SUCCESS':
+            csv_data = result.result
+            mem = BytesIO()
+            mem.write(csv_data.encode('utf-8'))
+            mem.seek(0)
+            return send_file(mem, mimetype='text/csv', as_attachment=True, download_name=f'applications_{job_id}.csv')
+        return jsonify({'msg': 'Export not ready'}), 400
+
+    @app.route('/api/student/profile', methods=['GET'])
+    @jwt_required()
+    def student_get_profile():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        user = User.query.get(get_user_id())
+        if not student:
+            return jsonify({'msg': 'Student not found'}), 404
+        
+        return jsonify({
+            'id': student.id,
+            'name': student.name,
+            'email': user.email,
+            'phone_number': student.phone_number,
+            'college_name': student.college_name,
+            'degree': student.degree,
+            'department': student.department,
+            'cgpa': student.cgpa,
+            'year': student.year,
+            'location': student.location,
+            'skills': student.skills,
+            'education': student.education,
+            'experience': student.experience,
+            'resume': student.resume
+        })
+
+    @app.route('/api/student/profile', methods=['PUT'])
+    @jwt_required()
+    def student_update_profile():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        if not student:
+            return jsonify({'msg': 'Student not found'}), 404
+        
+        data = request.json
+        student.name = data.get('name', student.name)
+        student.phone_number = data.get('phone_number', student.phone_number)
+        student.college_name = data.get('college_name', student.college_name)
+        student.degree = data.get('degree', student.degree)
+        student.department = data.get('department', student.department)
+        student.cgpa = data.get('cgpa', student.cgpa)
+        student.year = data.get('year', student.year)
+        student.location = data.get('location', student.location)
+        student.skills = data.get('skills', student.skills)
+        student.education = data.get('education', student.education)
+        student.experience = data.get('experience', student.experience)
+        student.resume = data.get('resume', student.resume)
+        db.session.commit()
+        return jsonify({'msg': 'Profile updated successfully'})
+
+    @app.route('/api/student/upload_resume', methods=['POST'])
+    @jwt_required()
+    def student_upload_resume():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        if 'file' not in request.files:
+            return jsonify({'msg': 'No file provided'}), 400        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'msg': 'No file selected'}), 400
+        if not allowed_file(file.filename):
+            return jsonify({'msg': 'Only PDF, DOC, and DOCX files are allowed'}), 400
+        if not os.path.exists(UPLOAD_FOLDER):
+            os.makedirs(UPLOAD_FOLDER)
+        
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        filename = secure_filename(f"resume_{student.id}_{datetime.utcnow().timestamp()}_{file.filename}")
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(file_path)
+        student.resume = filename
+        db.session.commit()
+        return jsonify({'msg': 'Resume uploaded successfully', 'resume': filename})
+
+    @app.route('/api/student/download_resume', methods=['GET'])
+    @jwt_required()
+    def student_download_resume():
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        if not student or not student.resume:
+            return jsonify({'msg': 'Resume not found'}), 404
+        resume_path = os.path.join(UPLOAD_FOLDER, student.resume)
+        if not os.path.exists(resume_path):
+            return jsonify({'msg': 'Resume file not found'}), 404
+        return send_file(resume_path, as_attachment=True)
