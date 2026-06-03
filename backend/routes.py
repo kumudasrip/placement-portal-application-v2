@@ -975,3 +975,106 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if not os.path.exists(resume_path):
             return jsonify({'msg': 'Resume file not found'}), 404
         return send_file(resume_path, as_attachment=True)
+
+    @app.route('/api/company/profile', methods=['GET'])
+    @jwt_required()
+    def company_get_profile():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        user = User.query.get(get_user_id())
+        if not company:
+            return jsonify({'msg': 'Company not found'}), 404
+        
+        return jsonify({
+            'id': company.id,
+            'name': company.name,
+            'email': user.email,
+            'company_email': company.company_email,
+            'hr_contact': company.hr_contact,
+            'website': company.website,
+            'industry': company.industry,
+            'location': company.location,
+            'registration_number': company.registration_number,
+            'approval_status': company.approval_status
+        })
+
+    @app.route('/api/company/profile', methods=['PUT'])
+    @jwt_required()
+    def company_update_profile():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        if not company:
+            return jsonify({'msg': 'Company not found'}), 404
+        
+        data = request.json
+        company.name = data.get('name', company.name)
+        company.company_email = data.get('company_email', company.company_email)
+        company.hr_contact = data.get('hr_contact', company.hr_contact)
+        company.website = data.get('website', company.website)
+        company.industry = data.get('industry', company.industry)
+        company.location = data.get('location', company.location)
+        company.registration_number = data.get('registration_number', company.registration_number)
+        db.session.commit()
+        return jsonify({'msg': 'Company profile updated successfully'})
+
+    @app.route('/api/drives/<int:drive_id>', methods=['GET'])
+    def get_drive_details(drive_id):
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.status != 'approved':
+            return jsonify({'msg': 'Drive not available'}), 403
+        
+        return jsonify({
+            'id': drive.id,
+            'job_title': drive.job_title,
+            'job_description': drive.job_description,
+            'company_name': drive.company.name,
+            'company_id': drive.company.id,
+            'eligibility_criteria': drive.eligibility_criteria,
+            'skills_required': drive.skills_required,
+            'salary': drive.salary,
+            'location': drive.location,
+            'num_positions': drive.num_positions,
+            'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
+            'status': drive.status,
+            'created_at': drive.created_at.strftime('%Y-%m-%d')
+        })
+
+    @app.route('/api/student/drives/<int:drive_id>/check_eligibility', methods=['GET'])
+    @jwt_required()
+    def check_drive_eligibility(drive_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        drive = PlacementDrive.query.get_or_404(drive_id)
+        if drive.status != 'approved':
+            return jsonify({'eligible': False, 'reason': 'Drive not approved'})
+        if drive.application_deadline and drive.application_deadline < datetime.utcnow():
+            return jsonify({'eligible': False, 'reason': 'Application deadline has passed'})
+        if Application.query.filter_by(student_id=student.id, drive_id=drive.id).first():
+            return jsonify({'eligible': False, 'reason': 'Already applied to this drive'})
+        eligible = True
+        reasons = []
+        if drive.eligibility_criteria:
+            criteria = drive.eligibility_criteria.lower()
+            if 'cgpa' in criteria:
+                try:
+                    import re
+                    cgpa_match = re.search(r'cgpa\s*>=?\s*(\d+\.?\d*)', criteria)
+                    if cgpa_match:
+                        required_cgpa = float(cgpa_match.group(1))
+                        if not student.cgpa or student.cgpa < required_cgpa:
+                            eligible = False
+                            reasons.append(f'CGPA requirement not met (Required: {required_cgpa}, Your CGPA: {student.cgpa or "N/A"})')
+                except:
+                    pass
+        
+        return jsonify({
+            'eligible': eligible,
+            'reasons': reasons if reasons else ['All eligibility criteria met'],
+            'student_cgpa': student.cgpa,
+            'student_skills': student.skills,
+            'drive_requirements': drive.eligibility_criteria
+        })
