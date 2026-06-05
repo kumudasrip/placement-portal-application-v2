@@ -1078,3 +1078,154 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'student_skills': student.skills,
             'drive_requirements': drive.eligibility_criteria
         })
+
+    @app.route('/api/company/applications', methods=['GET'])
+    @jwt_required()
+    def company_list_applications():
+        if get_role() != 'company':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        company = Company.query.filter_by(user_id=get_user_id()).first()
+        if not company:
+            return jsonify({'msg': 'Company not found'}), 404
+
+        drives = PlacementDrive.query.filter_by(company_id=company.id).all()
+        drive_ids = [d.id for d in drives]
+        applications = Application.query.filter(Application.drive_id.in_(drive_ids)).all()
+        return jsonify([{
+            'id': a.id,
+            'student_name': a.student.name,
+            'student_id': a.student.id,
+            'drive_title': a.drive.job_title,
+            'drive_id': a.drive.id,
+            'date': a.application_date.strftime('%Y-%m-%d'),
+            'status': a.status
+        } for a in applications])
+
+    def send_mail(to, subject, body):
+        try:
+            if not to or not subject or not body:
+                return False
+            msg = Message(subject, recipients=[to], body=body)
+            mail.send(msg)
+            return True
+        except Exception as e:
+            print(f"Mail error: {e}")
+            return False
+    
+    def send_enhanced_mail(to, subject, template_type, **kwargs):
+        """Send emails with enhanced templates"""
+        try:
+            if template_type == 'company_approved':
+                body = f"""Dear {kwargs.get('company_name', 'Company')},
+
+Your company registration has been approved by the Placement Portal admin.
+
+You can now:
+- Create and manage placement drives
+- View student applications
+- Schedule interviews
+- Confirm placements
+
+Portal URL: {request.host_url}
+Your Account: {to}
+
+Thank you for registering with our Placement Portal.
+
+Best Regards,
+Placement Portal Team"""
+            
+            elif template_type == 'drive_approved':
+                body = f"""Dear {kwargs.get('company_name', 'Company')},
+
+Your placement drive "{kwargs.get('drive_title', 'Job')}" has been approved.
+
+It is now visible to students and they can apply for the position.
+
+Drive Details:
+- Position: {kwargs.get('drive_title')}
+- Salary: {kwargs.get('salary', 'N/A')}
+- Deadline: {kwargs.get('deadline')}
+
+Thank you.
+
+Best Regards,
+Placement Portal Team"""
+            
+            elif template_type == 'application_status_changed':
+                body = f"""Dear {kwargs.get('student_name', 'Student')},
+
+Your application status for {kwargs.get('drive_title', 'position')} at {kwargs.get('company_name')} has been updated.
+
+New Status: {kwargs.get('status').upper()}
+Feedback: {kwargs.get('feedback', 'N/A')}
+
+Best Regards,
+Placement Portal Team"""
+            
+            elif template_type == 'interview_scheduled':
+                body = f"""Dear {kwargs.get('student_name', 'Student')},
+
+Your interview has been scheduled!
+
+Company: {kwargs.get('company_name')}
+Position: {kwargs.get('drive_title')}
+Date & Time: {kwargs.get('scheduled_date')}
+Type: {kwargs.get('interview_type', 'Online')}
+
+Please make sure to be available at the scheduled time.
+
+Best Regards,
+Placement Portal Team"""
+            
+            elif template_type == 'interview_result':
+                result = kwargs.get('result', 'unknown')
+                if result == 'pass':
+                    body = f"""Dear {kwargs.get('student_name', 'Student')},
+
+Congratulations! You have been selected for the position of {kwargs.get('drive_title')} at {kwargs.get('company_name')}.
+
+Feedback: {kwargs.get('feedback', 'N/A')}
+
+The company will contact you shortly with the offer details.
+
+Thank you for your interest and good luck!
+
+Best Regards,
+Placement Portal Team"""
+                else:
+                    body = f"""Dear {kwargs.get('student_name', 'Student')},
+
+Thank you for your interest in the position of {kwargs.get('drive_title')} at {kwargs.get('company_name')}.
+
+Unfortunately, you were not selected in this round.
+
+Feedback: {kwargs.get('feedback', 'N/A')}
+
+We encourage you to apply for other opportunities. Better luck next time!
+
+Best Regards,
+Placement Portal Team"""
+            
+            elif template_type == 'placement_confirmed':
+                body = f"""Dear {kwargs.get('student_name', 'Student')},
+
+Congratulations! Your placement has been confirmed.
+
+Company: {kwargs.get('company_name')}
+Position: {kwargs.get('position')}
+Salary: {kwargs.get('salary')}
+Joining Date: {kwargs.get('joining_date', 'To be announced')}
+
+An offer letter has been attached to your portal. Please download it from your placement history.
+
+Welcome aboard!
+
+Best Regards,
+Placement Portal Team"""
+            
+            else:
+                body = kwargs.get('body', '')
+            return send_mail(to, subject, body)
+        except Exception as e:
+            print(f"Enhanced mail error: {e}")
+            return False
