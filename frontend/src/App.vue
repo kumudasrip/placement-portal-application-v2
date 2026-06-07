@@ -9,14 +9,14 @@ const showGlobalHeader = computed(() => ['/login', '/register'].includes(route.p
 <template>
   <nav v-if="showGlobalHeader" class="navbar navbar-expand-lg navbar-dark bg-primary">
     <div class="container-fluid">
-      <a class="navbar-brand" href="#">PPA</a>
+      <RouterLink class="navbar-brand" to="/login">PPA</RouterLink>
       <div class="collapse navbar-collapse">
         <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
           <li class="nav-item">
-            <router-link class="nav-link" to="/login">Login</router-link>
+            <RouterLink class="nav-link" to="/login">Login</RouterLink>
           </li>
           <li class="nav-item">
-            <router-link class="nav-link" to="/register">Register</router-link>
+            <RouterLink class="nav-link" to="/register">Register</RouterLink>
           </li>
         </ul>
       </div>

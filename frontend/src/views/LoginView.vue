@@ -1,5 +1,9 @@
 <template>
-  <div class="container mt-5" style="max-width: 400px;">
+  <div class="container mt-5" style="max-width: 420px;">
+    <div class="text-center mb-4">
+      <h1>Welcome to Placement Portal</h1>
+      <p class="text-muted">Login to access your dashboard and manage drives, applications, and placements.</p>
+    </div>
     <h2 class="mb-4 text-center">Login</h2>
     <form @submit.prevent="login">
       <div class="mb-3">
@@ -13,7 +17,7 @@
       <div class="mb-3">
         <button class="btn btn-primary w-100" type="submit">Login</button>
       </div>
-      <div class="mb-2 text-center">
+      <div class="text-center mb-3">
         <router-link to="/register">Don't have an account? Register</router-link>
       </div>
       <div v-if="error" class="alert alert-danger mt-2">{{ error }}</div>
