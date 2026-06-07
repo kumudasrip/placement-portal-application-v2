@@ -43,6 +43,130 @@ def register_routes(app, db, jwt, mail, cache, celery):
     def get_user_id():
         return int(get_jwt_identity())
 
+    def normalize_skill_list(skills):
+        if not skills:
+            return []
+        if isinstance(skills, str):
+            items = [s.strip().lower() for s in __import__('re').split(r'[\n,;]+', skills) if s.strip()]
+            return items
+        if isinstance(skills, (list, tuple, set)):
+            return [str(s).strip().lower() for s in skills if str(s).strip()]
+        return [str(skills).strip().lower()]
+
+    def parse_float(value):
+        if value is None or value == '':
+            return None
+        try:
+            return float(value)
+        except Exception:
+            try:
+                match = __import__('re').search(r'(\d+\.?\d*)', str(value))
+                return float(match.group(1)) if match else None
+            except Exception:
+                return None
+
+    def parse_salary_to_rupees(salary_text):
+        if salary_text is None:
+            return None
+        try:
+            return float(int(str(salary_text).strip()))
+        except Exception:
+            try:
+                return float(str(salary_text).strip())
+            except Exception:
+                return None
+
+    def parse_int(value):
+        if value is None or value == '':
+            return None
+        try:
+            return int(float(value))
+        except Exception:
+            try:
+                match = __import__('re').search(r'(\d+)', str(value))
+                return int(match.group(1)) if match else None
+            except Exception:
+                return None
+
+    def parse_eligibility_requirements(criteria_text):
+        requirements = {
+            'min_cgpa': None,
+            'min_experience_years': None,
+            'min_year': None,
+            'skills_required': [],
+            'notes': None
+        }
+        if not criteria_text:
+            return requirements
+
+        text = criteria_text.lower()
+        requirements['min_cgpa'] = parse_float(__import__('re').search(r'cgpa\s*>=\s*(\d+\.?\d*)', text).group(1) if __import__('re').search(r'cgpa\s*>=\s*(\d+\.?\d*)', text) else None)
+        requirements['min_experience_years'] = parse_float(__import__('re').search(r'experience\s*>=\s*(\d+\.?\d*)', text).group(1) if __import__('re').search(r'experience\s*>=\s*(\d+\.?\d*)', text) else None)
+        requirements['min_year'] = parse_int(__import__('re').search(r'year\s*>=\s*(\d+)', text).group(1) if __import__('re').search(r'year\s*>=\s*(\d+)', text) else None)
+
+        skills_match = __import__('re').search(r'skills?:\s*([^;]+)', criteria_text, __import__('re').IGNORECASE)
+        if skills_match:
+            skills_text = skills_match.group(1)
+            requirements['skills_required'] = normalize_skill_list(skills_text)
+
+        notes_match = __import__('re').search(r'notes?:\s*(.+)', criteria_text, __import__('re').IGNORECASE)
+        if notes_match:
+            requirements['notes'] = notes_match.group(1).strip()
+
+        return requirements
+
+    def build_eligibility_criteria(min_cgpa=None, min_experience_years=None, min_year=None, skills=None, notes=None):
+        parts = []
+        if min_cgpa is not None:
+            parts.append(f'CGPA >= {min_cgpa}')
+        if min_experience_years is not None:
+            parts.append(f'Experience >= {min_experience_years}')
+        if min_year is not None:
+            parts.append(f'Year >= {min_year}')
+        if skills:
+            normalized = ', '.join(normalize_skill_list(skills))
+            if normalized:
+                parts.append(f'Skills: {normalized}')
+        if notes:
+            parts.append(f'Notes: {notes}')
+        return '; '.join(parts)
+
+    def get_drive_eligibility(student, drive):
+        requirements = parse_eligibility_requirements(drive.eligibility_criteria)
+        reasons = []
+        eligible = True
+
+        if requirements['min_cgpa'] is not None:
+            if student.cgpa is None or student.cgpa < requirements['min_cgpa']:
+                eligible = False
+                reasons.append(f'CGPA must be at least {requirements["min_cgpa"]}')
+
+        if requirements['min_experience_years'] is not None:
+            student_exp = parse_float(student.experience)
+            if student_exp is None or student_exp < requirements['min_experience_years']:
+                eligible = False
+                reasons.append(f'Experience must be at least {requirements["min_experience_years"]} years')
+
+        if requirements['min_year'] is not None:
+            if student.year is None or student.year < requirements['min_year']:
+                eligible = False
+                reasons.append(f'Study year must be at least {requirements["min_year"]}')
+
+        if requirements['skills_required']:
+            student_skills = normalize_skill_list(student.skills)
+            if not any(skill in student_skills for skill in requirements['skills_required']):
+                eligible = False
+                reasons.append(f'Requires one of these skills: {", ".join(requirements["skills_required"])}')
+
+        if eligible:
+            reasons = ['All eligibility criteria met']
+
+        return {
+            'eligible': eligible,
+            'reasons': reasons,
+            'requirements': requirements
+        }
+
     @app.route('/api/register/student', methods=['POST'])
     def register_student():
         data = request.json
@@ -99,11 +223,28 @@ def register_routes(app, db, jwt, mail, cache, celery):
     def admin_summary():
         if get_role() != 'admin':
             return jsonify({'msg': 'Unauthorized'}), 403
+        students_count = Student.query.count()
+        companies_count = Company.query.count()
+        drives_count = PlacementDrive.query.count()
+        applications_count = Application.query.count()
+        selected_apps = Application.query.filter_by(status='selected').all()
+        placements_count = len(selected_apps)
+        total_salary = 0.0
+        parsed_count = 0
+        for a in selected_apps:
+            salary_val = parse_salary_to_rupees(a.drive.salary)
+            if salary_val is not None:
+                total_salary += salary_val
+                parsed_count += 1
+        avg_salary = (total_salary / parsed_count) if parsed_count > 0 else None
+
         return jsonify({
-            'students': Student.query.count(),
-            'companies': Company.query.count(),
-            'drives': PlacementDrive.query.count(),
-            'applications': Application.query.count()
+            'students': students_count,
+            'companies': companies_count,
+            'drives': drives_count,
+            'applications': applications_count,
+            'placements': placements_count,
+            'avg_placement_salary': avg_salary
         })
 
     @app.route('/api/admin/companies', methods=['GET'])
@@ -380,7 +521,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
                 'status': app.status,
                 'date': app.application_date.strftime('%Y-%m-%d')
             })
-        
+        eligibility = parse_eligibility_requirements(drive.eligibility_criteria)
         return jsonify({
             'id': drive.id,
             'job_title': drive.job_title,
@@ -390,6 +531,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'company_email': drive.company.company_email,
             'eligibility_criteria': drive.eligibility_criteria,
             'skills_required': drive.skills_required,
+            'min_cgpa': eligibility['min_cgpa'],
+            'min_experience_years': eligibility['min_experience_years'],
+            'min_year': eligibility['min_year'],
+            'eligibility_notes': eligibility['notes'],
             'salary': drive.salary,
             'location': drive.location,
             'num_positions': drive.num_positions,
@@ -439,28 +584,73 @@ def register_routes(app, db, jwt, mail, cache, celery):
             })
         return jsonify({'items': apps, 'total': total, 'page': page, 'per_page': per_page})
 
+    @app.route('/api/admin/placements', methods=['GET'])
+    @jwt_required()
+    def admin_list_placements():
+        if get_role() != 'admin':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        placements = Application.query.filter_by(status='selected').order_by(Application.id.desc()).all()
+        items = []
+        for a in placements:
+            salary = a.drive.salary
+            salary_numeric = parse_salary_to_rupees(salary)
+            items.append({
+                'id': a.id,
+                'student': a.student.name,
+                'student_email': a.student.user.email,
+                'company': a.drive.company.name,
+                'drive': a.drive.job_title,
+                'status': a.status,
+                'date': a.application_date.strftime('%Y-%m-%d'),
+                'salary': salary,
+                'salary_numeric': salary_numeric
+            })
+        return jsonify({'items': items, 'total': len(items)})
+
     @app.route('/api/admin/applications/<int:application_id>', methods=['GET'])
     @jwt_required()
     def admin_get_application_detail(application_id):
         if get_role() != 'admin':
             return jsonify({'msg': 'Unauthorized'}), 403
         application = Application.query.get_or_404(application_id)
-        
+        student = application.student
+        drive = application.drive
+        company = drive.company
+        eligibility = parse_eligibility_requirements(drive.eligibility_criteria)
+
         return jsonify({
             'id': application.id,
             'student_id': application.student_id,
-            'student_name': application.student.name,
-            'student_email': application.student.user.email,
-            'student_cgpa': application.student.cgpa,
-            'student_department': application.student.department,
-            'student_year': application.student.year,
+            'student_name': student.name,
+            'student_email': student.user.email,
+            'student_phone_number': student.phone_number,
+            'student_college_name': student.college_name,
+            'student_degree': student.degree,
+            'student_department': student.department,
+            'student_year': student.year,
+            'student_location': student.location,
+            'student_cgpa': student.cgpa,
+            'student_skills': student.skills,
+            'student_experience': student.experience,
+            'student_resume': student.resume,
             'drive_id': application.drive_id,
-            'drive_title': application.drive.job_title,
-            'company_id': application.drive.company_id,
-            'company_name': application.drive.company.name,
+            'drive_title': drive.job_title,
+            'drive_description': drive.job_description,
+            'company_id': company.id,
+            'company_name': company.name,
+            'company_email': company.company_email,
             'status': application.status,
             'feedback': application.feedback,
             'application_date': application.application_date.strftime('%Y-%m-%d %H:%M'),
+            'salary': drive.salary,
+            'location': drive.location,
+            'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
+            'eligibility_criteria': drive.eligibility_criteria,
+            'eligibility_min_cgpa': eligibility['min_cgpa'],
+            'eligibility_min_experience_years': eligibility['min_experience_years'],
+            'eligibility_min_year': eligibility['min_year'],
+            'eligibility_skills': eligibility['skills_required'],
+            'eligibility_notes': eligibility['notes']
         })
 
     @app.route('/api/admin/search', methods=['GET'])
@@ -568,15 +758,34 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if get_role() != 'company':
             return jsonify({'msg': 'Unauthorized'}), 403
         company = Company.query.filter_by(user_id=get_user_id()).first()
-        data = request.json
+        data = request.json or {}
+        job_title = data.get('job_title')
+        if not job_title:
+            return jsonify({'msg': 'Missing required field: job_title'}), 400
+
+        app_deadline = None
+        if data.get('application_deadline'):
+            try:
+                app_deadline = datetime.strptime(data.get('application_deadline'), '%Y-%m-%d')
+            except Exception:
+                return jsonify({'msg': 'Invalid date format for application_deadline. Use YYYY-MM-DD'}), 400
+
+        min_cgpa = parse_float(data.get('min_cgpa'))
+        min_experience_years = parse_float(data.get('min_experience_years'))
+        min_year = parse_int(data.get('min_year'))
+        skills_required = data.get('skills_required') or data.get('skills')
+        eligibility_notes = data.get('eligibility_notes') or data.get('eligibility_criteria')
+        eligibility_summary = build_eligibility_criteria(min_cgpa, min_experience_years, min_year, skills_required, eligibility_notes)
+
         drive = PlacementDrive(
             company_id=company.id,
-            job_title=data['job_title'],
+            job_title=job_title,
             job_description=data.get('job_description'),
-            eligibility_criteria=data.get('eligibility_criteria'),
+            eligibility_criteria=eligibility_summary,
+            skills_required=skills_required,
             salary=data.get('salary'),
             location=data.get('location'),
-            application_deadline=datetime.strptime(data['application_deadline'], '%Y-%m-%d'),
+            application_deadline=app_deadline,
             status='pending'
         )
         db.session.add(drive)
@@ -605,9 +814,9 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if new_status not in ['active', 'closed']:
             return jsonify({'msg': 'Invalid status. Use "active" or "closed"'}), 400
         if new_status == 'active':
-            drive.status = 'approved'  
-        else: 
-            drive.status = 'closed' 
+            drive.status = 'approved'
+        else:
+            drive.status = 'closed'
         
         db.session.commit()
         cache.clear()
@@ -696,8 +905,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
 
         email_subject = 'Application Status Updated'
         email_body = f'Your application status for {drive.job_title} is now {application.status.upper()}.'
-        if data.get('date'):
-            email_body += f'\n\nDate: {data.get("date")}'
+        if data.get('interview_date'):
+            email_body += f'\n\nInterview Date: {data.get("interview_date")}'
+        if data.get('joining_date'):
+            email_body += f'\n\nJoining Date: {data.get("joining_date")}'
         if data.get('feedback'):
             email_body += f'\n\nDetails: {data.get("feedback")}'
         send_mail(application.student.user.email, email_subject, email_body)
@@ -722,22 +933,39 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
         student = Student.query.filter_by(user_id=get_user_id()).first()
-        drives = PlacementDrive.query.filter(
-            (PlacementDrive.status == 'approved') & 
-            (PlacementDrive.application_deadline >= datetime.utcnow())
-        ).all()
-        eligible_drives = []
+        search = request.args.get('search', '').strip()
+        eligible_only = request.args.get('eligible_only', 'false').lower() in ('1', 'true', 'yes')
+        query = PlacementDrive.query.filter(
+            (PlacementDrive.status == 'approved') &
+            ((PlacementDrive.application_deadline == None) | (PlacementDrive.application_deadline >= datetime.utcnow()))
+        ).join(Company)
+
+        if search:
+            like = f'%{search}%'
+            query = query.filter(
+                (PlacementDrive.job_title.ilike(like)) |
+                (Company.name.ilike(like)) |
+                (Company.industry.ilike(like))
+            )
+
+        drives = query.all()
+        drive_list = []
         for d in drives:
-            eligible_drives.append({
+            eligibility = get_drive_eligibility(student, d)
+            if eligible_only and not eligibility['eligible']:
+                continue
+            drive_list.append({
                 'id': d.id,
                 'title': d.job_title,
                 'company': d.company.name,
                 'company_id': d.company.id,
-                'deadline': d.application_deadline.strftime('%Y-%m-%d'),
+                'deadline': d.application_deadline.strftime('%Y-%m-%d') if d.application_deadline else None,
                 'salary': d.salary,
-                'location': d.location
+                'location': d.location,
+                'eligible': eligibility['eligible'],
+                'eligibility_reasons': eligibility['reasons']
             })
-        return jsonify(eligible_drives)
+        return jsonify(drive_list)
 
     @app.route('/api/student/companies', methods=['GET'])
     @jwt_required()
@@ -793,6 +1021,11 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'website': company.website,
             'hr_contact': company.hr_contact,
             'company_email': company.company_email,
+            'email': company.user.email if getattr(company, 'user', None) else None,
+            'is_active': company.is_active,
+            'approval_status': company.approval_status,
+            'registration_number': company.registration_number,
+            'created_at': company.created_at.strftime('%Y-%m-%d') if company.created_at else None,
             'active_drives': len(drives_data),
             'drives': drives_data
         })
@@ -805,7 +1038,9 @@ def register_routes(app, db, jwt, mail, cache, celery):
         drive = PlacementDrive.query.get_or_404(drive_id)
         if drive.status != 'approved':
             return jsonify({'msg': 'Drive not available'}), 403
-        
+
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        eligibility = get_drive_eligibility(student, drive)
         return jsonify({
             'id': drive.id,
             'job_title': drive.job_title,
@@ -814,12 +1049,18 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'company_id': drive.company.id,
             'eligibility_criteria': drive.eligibility_criteria,
             'skills_required': drive.skills_required,
+            'min_cgpa': parse_eligibility_requirements(drive.eligibility_criteria)['min_cgpa'],
+            'min_experience_years': parse_eligibility_requirements(drive.eligibility_criteria)['min_experience_years'],
+            'min_year': parse_eligibility_requirements(drive.eligibility_criteria)['min_year'],
+            'notes': parse_eligibility_requirements(drive.eligibility_criteria)['notes'],
             'salary': drive.salary,
             'location': drive.location,
             'num_positions': drive.num_positions,
             'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
             'status': drive.status,
-            'created_at': drive.created_at.strftime('%Y-%m-%d')
+            'created_at': drive.created_at.strftime('%Y-%m-%d'),
+            'eligible': eligibility['eligible'],
+            'eligibility_reasons': eligibility['reasons']
         })
 
     @app.route('/api/student/drives/<int:drive_id>/apply', methods=['POST'])
@@ -831,6 +1072,14 @@ def register_routes(app, db, jwt, mail, cache, celery):
         drive = PlacementDrive.query.get_or_404(drive_id)
         if Application.query.filter_by(student_id=student.id, drive_id=drive.id).first():
             return jsonify({'msg': 'Already applied'}), 400
+        if drive.status != 'approved':
+            return jsonify({'msg': 'Drive not available'}), 403
+        if drive.application_deadline and drive.application_deadline < datetime.utcnow():
+            return jsonify({'msg': 'Application deadline has passed'}), 400
+        eligibility = get_drive_eligibility(student, drive)
+        if not eligibility['eligible']:
+            return jsonify({'msg': 'Not eligible to apply', 'reasons': eligibility['reasons']}), 403
+
         application = Application(student_id=student.id, drive_id=drive.id)
         db.session.add(application)
         db.session.commit()
@@ -848,15 +1097,82 @@ def register_routes(app, db, jwt, mail, cache, celery):
             {'id': a.id, 'drive': a.drive.job_title, 'company': a.drive.company.name, 'status': a.status, 'date': a.application_date.strftime('%Y-%m-%d')} for a in applications
         ])
 
+    @app.route('/api/student/applications/<int:application_id>', methods=['GET'])
+    @jwt_required()
+    def student_get_application_detail(application_id):
+        if get_role() != 'student':
+            return jsonify({'msg': 'Unauthorized'}), 403
+        student = Student.query.filter_by(user_id=get_user_id()).first()
+        application = Application.query.get_or_404(application_id)
+        if application.student_id != student.id:
+            return jsonify({'msg': 'Unauthorized'}), 403
+
+        drive = application.drive
+        company = drive.company
+        eligibility = parse_eligibility_requirements(drive.eligibility_criteria)
+
+        return jsonify({
+            'id': application.id,
+            'status': application.status,
+            'feedback': application.feedback,
+            'application_date': application.application_date.strftime('%Y-%m-%d %H:%M'),
+            'student_name': student.name,
+            'student_email': student.user.email,
+            'student_phone_number': student.phone_number,
+            'student_college_name': student.college_name,
+            'student_degree': student.degree,
+            'student_department': student.department,
+            'student_cgpa': student.cgpa,
+            'student_year': student.year,
+            'student_location': student.location,
+            'student_skills': student.skills,
+            'student_experience': student.experience,
+            'student_resume': student.resume,
+            'drive_id': drive.id,
+            'drive_title': drive.job_title,
+            'drive_description': drive.job_description,
+            'company_id': company.id,
+            'company_name': company.name,
+            'company_email': company.company_email,
+            'company_hr_contact': company.hr_contact,
+            'company_website': company.website,
+            'salary': drive.salary,
+            'location': drive.location,
+            'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
+            'eligibility_criteria': drive.eligibility_criteria,
+            'eligibility_min_cgpa': eligibility['min_cgpa'],
+            'eligibility_min_experience_years': eligibility['min_experience_years'],
+            'eligibility_min_year': eligibility['min_year'],
+            'eligibility_skills': eligibility['skills_required'],
+            'eligibility_notes': eligibility['notes']
+        })
+
     @app.route('/api/student/export_applications', methods=['POST'])
     @jwt_required()
     def student_export_applications():
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
         student = Student.query.filter_by(user_id=get_user_id()).first()
-        from tasks import export_applications_to_csv
-        task = export_applications_to_csv.delay(student.id)
-        return jsonify({'msg': 'Export job queued', 'job_id': task.id, 'status': 'pending'})
+        applications = Application.query.filter_by(student_id=student.id).all()
+
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Application ID', 'Drive Title', 'Company Name', 'Status', 'Application Date'])
+        for a in applications:
+            writer.writerow([
+                a.id,
+                a.drive.job_title,
+                a.drive.company.name,
+                a.status,
+                a.application_date.strftime('%Y-%m-%d')
+            ])
+
+        csv_data = output.getvalue()
+        mem = BytesIO()
+        mem.write(csv_data.encode('utf-8'))
+        mem.seek(0)
+        filename = f'applications_{student.id}_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}.csv'
+        return send_file(mem, mimetype='text/csv', as_attachment=True, download_name=filename)
 
     @app.route('/api/student/export_status/<job_id>', methods=['GET'])
     @jwt_required()
@@ -946,7 +1262,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
         if 'file' not in request.files:
-            return jsonify({'msg': 'No file provided'}), 400        
+            return jsonify({'msg': 'No file provided'}), 400
         file = request.files['file']
         if file.filename == '':
             return jsonify({'msg': 'No file selected'}), 400
@@ -958,7 +1274,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
         student = Student.query.filter_by(user_id=get_user_id()).first()
         filename = secure_filename(f"resume_{student.id}_{datetime.utcnow().timestamp()}_{file.filename}")
         file_path = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(file_path)
+        file.save(file_path)  
         student.resume = filename
         db.session.commit()
         return jsonify({'msg': 'Resume uploaded successfully', 'resume': filename})
@@ -1050,56 +1366,21 @@ def register_routes(app, db, jwt, mail, cache, celery):
         student = Student.query.filter_by(user_id=get_user_id()).first()
         drive = PlacementDrive.query.get_or_404(drive_id)
         if drive.status != 'approved':
-            return jsonify({'eligible': False, 'reason': 'Drive not approved'})
+            return jsonify({'eligible': False, 'reasons': ['Drive not approved']})
         if drive.application_deadline and drive.application_deadline < datetime.utcnow():
-            return jsonify({'eligible': False, 'reason': 'Application deadline has passed'})
+            return jsonify({'eligible': False, 'reasons': ['Application deadline has passed']})
         if Application.query.filter_by(student_id=student.id, drive_id=drive.id).first():
-            return jsonify({'eligible': False, 'reason': 'Already applied to this drive'})
-        eligible = True
-        reasons = []
-        if drive.eligibility_criteria:
-            criteria = drive.eligibility_criteria.lower()
-            if 'cgpa' in criteria:
-                try:
-                    import re
-                    cgpa_match = re.search(r'cgpa\s*>=?\s*(\d+\.?\d*)', criteria)
-                    if cgpa_match:
-                        required_cgpa = float(cgpa_match.group(1))
-                        if not student.cgpa or student.cgpa < required_cgpa:
-                            eligible = False
-                            reasons.append(f'CGPA requirement not met (Required: {required_cgpa}, Your CGPA: {student.cgpa or "N/A"})')
-                except:
-                    pass
-        
+            return jsonify({'eligible': False, 'reasons': ['Already applied to this drive']})
+        eligibility = get_drive_eligibility(student, drive)
         return jsonify({
-            'eligible': eligible,
-            'reasons': reasons if reasons else ['All eligibility criteria met'],
+            'eligible': eligibility['eligible'],
+            'reasons': eligibility['reasons'],
             'student_cgpa': student.cgpa,
-            'student_skills': student.skills,
+            'student_experience': student.experience,
+            'student_year': student.year,
+            'student_skills': normalize_skill_list(student.skills),
             'drive_requirements': drive.eligibility_criteria
         })
-
-    @app.route('/api/company/applications', methods=['GET'])
-    @jwt_required()
-    def company_list_applications():
-        if get_role() != 'company':
-            return jsonify({'msg': 'Unauthorized'}), 403
-        company = Company.query.filter_by(user_id=get_user_id()).first()
-        if not company:
-            return jsonify({'msg': 'Company not found'}), 404
-
-        drives = PlacementDrive.query.filter_by(company_id=company.id).all()
-        drive_ids = [d.id for d in drives]
-        applications = Application.query.filter(Application.drive_id.in_(drive_ids)).all()
-        return jsonify([{
-            'id': a.id,
-            'student_name': a.student.name,
-            'student_id': a.student.id,
-            'drive_title': a.drive.job_title,
-            'drive_id': a.drive.id,
-            'date': a.application_date.strftime('%Y-%m-%d'),
-            'status': a.status
-        } for a in applications])
 
     def send_mail(to, subject, body):
         try:
@@ -1113,7 +1394,6 @@ def register_routes(app, db, jwt, mail, cache, celery):
             return False
     
     def send_enhanced_mail(to, subject, template_type, **kwargs):
-        """Send emails with enhanced templates"""
         try:
             if template_type == 'company_approved':
                 body = f"""Dear {kwargs.get('company_name', 'Company')},

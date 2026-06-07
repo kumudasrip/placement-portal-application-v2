@@ -14,7 +14,7 @@ def register_tasks(celery, mail):
             with _flask_app.app_context():
                 admins = User.query.filter_by(role="admin").all()
                 if not admins:
-                    return {"status": "error", "message": "No admin users found"}
+                    return {"status": "error", "message": "No admin users found"}  
                 now = datetime.utcnow()
                 first_day_last_month = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
                 last_day_last_month = now.replace(day=1) - timedelta(days=1)
@@ -27,12 +27,32 @@ def register_tasks(celery, mail):
 
                 total_placements = len(selected_apps)
                 total_salary = 0.0
+                parsed_count = 0
                 avg_salary = 0.0
                 total_applications = Application.query.filter(
                     Application.application_date >= first_day_last_month,
                     Application.application_date <= last_day_last_month
                 ).count()
                 
+                def parse_salary_to_rupees(salary_text):
+                    if salary_text is None:
+                        return None
+                    try:
+                        return float(int(str(salary_text).strip()))
+                    except Exception:
+                        try:
+                            return float(str(salary_text).strip())
+                        except Exception:
+                            return None
+
+                for a in selected_apps:
+                    salary_val = parse_salary_to_rupees(a.drive.salary)
+                    if salary_val is not None:
+                        total_salary += salary_val
+                        parsed_count += 1
+
+                avg_salary = (total_salary / parsed_count) if parsed_count > 0 else 0.0
+
                 report_text = f"""
 Hello Admin,
 
@@ -89,7 +109,7 @@ PPA Team
                 students = Student.query.filter_by(is_active=True, is_blacklisted=False).all()
                 for student in students:
                     applied_drive_ids = [app.drive_id for app in student.applications]
-                    unapplied_drives = [d for d in open_drives if d.id not in applied_drive_ids]
+                    unapplied_drives = [d for d in open_drives if d.id not in applied_drive_ids]    
                     if unapplied_drives:
                         drives_list = "\n".join(
                             [f"  • {drive.job_title} at {drive.company.name}\n    Salary: {drive.salary}\n    Location: {drive.location or 'TBD'}\n    Deadline: {drive.application_deadline.strftime('%d-%m-%Y') if drive.application_deadline else 'TBD'}"
@@ -121,7 +141,7 @@ Best of luck!
 
 Regards,
 PPA Team
-                        """   
+                        """
                         try:
                             mail.send_message(
                                 subject="Placement Drive Reminder - Don't Miss Out!",
@@ -167,3 +187,7 @@ PPA Team
             return si.getvalue()
         except Exception as e:
             return {"status": "error", "message": str(e)}
+    try:
+        globals()['export_applications_to_csv'] = export_applications_to_csv
+    except Exception:
+        pass
