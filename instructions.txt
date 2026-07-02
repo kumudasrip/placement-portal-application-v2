@@ -1,0 +1,43 @@
+PREREQUISITES:
+- Python 3.13.12
+- Node v24.13.0
+- npm 11.6.2
+- Redis extracted to C:\Redis\
+- MailHog downloaded to C:\dev-tools\MailHog\
+
+Verify installations:
+  python --version          → Python 3.13.12
+  node --version            → v24.13.0
+  npm --version             → 11.6.2
+  C:\Redis\redis-server.exe → Exists
+  C:\dev-tools\MailHog\MailHog.exe → Exists
+
+CMD 1: REDIS SERVER (Leave running)
+C:\Redis\redis-server.exe
+
+CMD 2: MAILHOG (Leave running)
+C:\dev-tools\MailHog\MailHog.exe
+
+CMD 3: BACKEND FLASK SERVER (Leave running)
+cd backend
+python -m venv venv
+venv\Scripts\activate.bat
+pip install -r requirements.txt
+python app.py
+
+CMD 4: CELERY WORKER (Leave running)
+cd backend
+venv\Scripts\activate.bat
+celery -A celery_worker worker --pool=solo --loglevel=info
+
+CMD 5: CELERY BEAT (Leave running)
+cd backend
+venv\Scripts\activate.bat
+celery -A app.celery beat --loglevel=info
+
+
+CMD 6: FRONTEND VUE APP (Leave running)
+cd frontend
+npm install
+echo VITE_API_BASE=http://localhost:5000 > .env.local
+npm run dev

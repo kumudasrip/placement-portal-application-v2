@@ -203,6 +203,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
         company = Company(user_id=user.id, name=data.get('name', data['username']), hr_contact=data.get('hr_contact'), website=data.get('website'), industry=data.get('industry'), location=data.get('location'))
         db.session.add(company)
         db.session.commit()
+        try:
+            cache.clear()
+        except Exception:
+            pass
         return jsonify({'msg': 'Company registered, pending admin approval'})
 
     @app.route('/api/login', methods=['POST'])
@@ -928,7 +932,6 @@ def register_routes(app, db, jwt, mail, cache, celery):
 
     @app.route('/api/student/drives', methods=['GET'])
     @jwt_required()
-    @cache.cached(timeout=300, query_string=True)
     def student_list_drives():
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
