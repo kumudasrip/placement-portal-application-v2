@@ -43,6 +43,13 @@ def register_routes(app, db, jwt, mail, cache, celery):
     def get_user_id():
         return int(get_jwt_identity())
 
+    def make_student_drives_cache_key():
+        user_id = get_user_id()
+        query_parts = []
+        for key in sorted(request.args.keys()):
+            query_parts.append(f"{key}={request.args.get(key)}")
+        return f"student_drives_{user_id}:" + "&".join(query_parts)
+
     def normalize_skill_list(skills):
         if not skills:
             return []
@@ -794,6 +801,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
         )
         db.session.add(drive)
         db.session.commit()
+        try:
+            cache.clear()
+        except Exception:
+            pass
         return jsonify({'msg': 'Drive created, pending admin approval'})
 
     @app.route('/api/company/drives', methods=['GET'])
@@ -908,14 +919,18 @@ def register_routes(app, db, jwt, mail, cache, celery):
         db.session.commit()
 
         email_subject = 'Application Status Updated'
-        email_body = f'Your application status for {drive.job_title} is now {application.status.upper()}.'
-        if data.get('interview_date'):
-            email_body += f'\n\nInterview Date: {data.get("interview_date")}'
-        if data.get('joining_date'):
-            email_body += f'\n\nJoining Date: {data.get("joining_date")}'
-        if data.get('feedback'):
-            email_body += f'\n\nDetails: {data.get("feedback")}'
-        send_mail(application.student.user.email, email_subject, email_body)
+        send_enhanced_mail(
+            application.student.user.email,
+            email_subject,
+            'application_status_changed',
+            student_name=application.student.name,
+            company_name=drive.company.name,
+            drive_title=drive.job_title,
+            status=application.status,
+            interview_date=data.get('interview_date'),
+            joining_date=data.get('joining_date'),
+            feedback=data.get('feedback')
+        )
         return jsonify({'msg': 'Application status updated'})
 
     @app.route('/api/student/summary', methods=['GET'])
@@ -932,6 +947,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
 
     @app.route('/api/student/drives', methods=['GET'])
     @jwt_required()
+    @cache.cached(timeout=300, make_cache_key=make_student_drives_cache_key)
     def student_list_drives():
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
@@ -972,6 +988,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
 
     @app.route('/api/student/companies', methods=['GET'])
     @jwt_required()
+    @cache.cached(timeout=300, query_string=True)
     def student_search_companies():
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
@@ -1086,6 +1103,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
         application = Application(student_id=student.id, drive_id=drive.id)
         db.session.add(application)
         db.session.commit()
+        try:
+            cache.clear()
+        except Exception:
+            pass
         send_mail(student.user.email, 'Application Submitted', f'You have applied for {drive.job_title}.')
         return jsonify({'msg': 'Applied successfully'})
 
@@ -1336,6 +1357,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
         company.location = data.get('location', company.location)
         company.registration_number = data.get('registration_number', company.registration_number)
         db.session.commit()
+        try:
+            cache.clear()
+        except Exception:
+            pass
         return jsonify({'msg': 'Company profile updated successfully'})
 
     @app.route('/api/drives/<int:drive_id>', methods=['GET'])
@@ -1435,77 +1460,58 @@ Best Regards,
 Placement Portal Team"""
             
             elif template_type == 'application_status_changed':
-                body = f"""Dear {kwargs.get('student_name', 'Student')},
+                status = kwargs.get('status', 'updated').lower()
+                feedback = kwargs.get('feedback')
+                interview_date = kwargs.get('interview_date')
+                joining_date = kwargs.get('joining_date')
 
-Your application status for {kwargs.get('drive_title', 'position')} at {kwargs.get('company_name')} has been updated.
-
-New Status: {kwargs.get('status').upper()}
-Feedback: {kwargs.get('feedback', 'N/A')}
-
-Best Regards,
-Placement Portal Team"""
-            
-            elif template_type == 'interview_scheduled':
-                body = f"""Dear {kwargs.get('student_name', 'Student')},
-
-Your interview has been scheduled!
-
-Company: {kwargs.get('company_name')}
-Position: {kwargs.get('drive_title')}
-Date & Time: {kwargs.get('scheduled_date')}
-Type: {kwargs.get('interview_type', 'Online')}
-
-Please make sure to be available at the scheduled time.
-
-Best Regards,
-Placement Portal Team"""
-            
-            elif template_type == 'interview_result':
-                result = kwargs.get('result', 'unknown')
-                if result == 'pass':
+                if status == 'shortlisted':
                     body = f"""Dear {kwargs.get('student_name', 'Student')},
 
-Congratulations! You have been selected for the position of {kwargs.get('drive_title')} at {kwargs.get('company_name')}.
+Great news! You have been shortlisted for the position of "{kwargs.get('drive_title', 'the position')}" at {kwargs.get('company_name')}.
 
-Feedback: {kwargs.get('feedback', 'N/A')}
+Interview Details:
+- Company: {kwargs.get('company_name')}
+- Position: {kwargs.get('drive_title')}
+- Interview Date: {interview_date or 'To be scheduled'}
 
-The company will contact you shortly with the offer details.
+"""
+                    if feedback:
+                        body += f"Additional Details: {feedback}\n\n"
+                    body += "Please keep your calendar open and watch your email for the official interview confirmation.\n\nBest Regards,\nPlacement Portal Team"
 
-Thank you for your interest and good luck!
+                elif status == 'selected':
+                    body = f"""Dear {kwargs.get('student_name', 'Student')},
 
-Best Regards,
-Placement Portal Team"""
+Congratulations! You have been selected for the position of "{kwargs.get('drive_title', 'the position')}" at {kwargs.get('company_name')}.
+
+Placement Details:
+- Company: {kwargs.get('company_name')}
+- Position: {kwargs.get('drive_title')}
+- Salary: {kwargs.get('salary', 'To be confirmed')}
+- Joining Date: {joining_date or 'To be announced'}
+
+"""
+                    if feedback:
+                        body += f"Additional Notes: {feedback}\n\n"
+                    body += "Please check your portal for further instructions and next steps.\n\nBest Regards,\nPlacement Portal Team"
+
                 else:
                     body = f"""Dear {kwargs.get('student_name', 'Student')},
 
-Thank you for your interest in the position of {kwargs.get('drive_title')} at {kwargs.get('company_name')}.
+Your application status for "{kwargs.get('drive_title', 'the position')}" at {kwargs.get('company_name')} has been updated.
 
-Unfortunately, you were not selected in this round.
+Status: {kwargs.get('status', 'Updated').upper()}
 
-Feedback: {kwargs.get('feedback', 'N/A')}
+"""
+                    if interview_date:
+                        body += f"Interview Date: {interview_date}\n"
+                    if joining_date:
+                        body += f"Joining Date: {joining_date}\n"
+                    if feedback:
+                        body += f"\nDetails: {feedback}\n"
+                    body += "\nThank you for using Placement Portal.\n\nBest Regards,\nPlacement Portal Team"
 
-We encourage you to apply for other opportunities. Better luck next time!
-
-Best Regards,
-Placement Portal Team"""
-            
-            elif template_type == 'placement_confirmed':
-                body = f"""Dear {kwargs.get('student_name', 'Student')},
-
-Congratulations! Your placement has been confirmed.
-
-Company: {kwargs.get('company_name')}
-Position: {kwargs.get('position')}
-Salary: {kwargs.get('salary')}
-Joining Date: {kwargs.get('joining_date', 'To be announced')}
-
-An offer letter has been attached to your portal. Please download it from your placement history.
-
-Welcome aboard!
-
-Best Regards,
-Placement Portal Team"""
-            
             else:
                 body = kwargs.get('body', '')
             return send_mail(to, subject, body)

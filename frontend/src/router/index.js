@@ -4,6 +4,7 @@ import RegisterView from '../views/RegisterView.vue'
 import AdminDashboard from '../views/AdminDashboard.vue'
 import CompanyDashboard from '../views/CompanyDashboard.vue'
 import StudentDashboard from '../views/StudentDashboard.vue'
+import StudentHistory from '../views/StudentHistory.vue'
 import StudentProfileEdit from '../views/StudentProfileEdit.vue'
 import StudentSearchDashboard from '../views/StudentSearchDashboard.vue'
 
@@ -15,6 +16,7 @@ const routes = [
   { path: '/company', name: 'CompanyDashboard', component: CompanyDashboard },
   { path: '/company/interviews', redirect: '/company' },
   { path: '/student', name: 'StudentDashboard', component: StudentDashboard },
+  { path: '/student/history', name: 'StudentHistory', component: StudentHistory },
   { path: '/student/edit-profile', name: 'StudentProfileEdit', component: StudentProfileEdit },
   { path: '/student/search', name: 'StudentSearchDashboard', component: StudentSearchDashboard },
   { path: '/student/placements', redirect: '/student' },
