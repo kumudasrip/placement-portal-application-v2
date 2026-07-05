@@ -61,15 +61,16 @@
               <strong>Company:</strong> {{ drive.company }}<br/>
               <strong>Salary:</strong> {{ drive.salary || 'N/A' }}<br/>
               <strong>Location:</strong> {{ drive.location || 'N/A' }}<br/>
-              <strong>Deadline:</strong> {{ drive.deadline || 'N/A' }}
+              <strong>Deadline:</strong> {{ drive.deadline || 'N/A' }}<br/>
+              <strong>Status:</strong> <span class="badge" :class="getDriveStatusBadgeClass(drive)">{{ getDriveStatusLabel(drive) }}</span>
             </p>
             <div v-if="driveEligibility[drive.id]" class="mb-2">
               <span v-if="driveEligibility[drive.id].eligible" class="badge bg-success">Eligible</span>
               <span v-else class="badge bg-danger">Not Eligible: {{ driveEligibility[drive.id].reasons[0] }}</span>
             </div>
             <button class="btn btn-info btn-sm me-2" @click="openDriveModal(drive.id)">View Details</button>
-            <button v-if="driveEligibility[drive.id]?.eligible" class="btn btn-success btn-sm" @click="applyDrive(drive.id)" :disabled="drive.applied">
-              {{ drive.applied ? 'Already Applied' : 'Apply' }}
+            <button v-if="driveEligibility[drive.id]?.eligible" class="btn btn-success btn-sm" @click="applyDrive(drive.id)" :disabled="!drive.can_apply || drive.applied">
+              {{ drive.applied ? 'Already Applied' : (drive.can_apply ? 'Apply' : (drive.is_closed ? 'Closed' : 'Drive Ended')) }}
             </button>
             <button v-else disabled class="btn btn-success btn-sm">Apply</button>
           </div>
@@ -104,6 +105,18 @@ const showDriveModal = ref(false)
 const openCompanyModal = (id) => {
   selectedCompanyId.value = id
   showCompanyModal.value = true
+}
+
+const getDriveStatusLabel = (drive) => {
+  if (drive.is_closed) return 'Closed'
+  if (drive.is_ended) return 'Drive Ended'
+  return 'Open'
+}
+
+const getDriveStatusBadgeClass = (drive) => {
+  if (drive.is_closed) return 'bg-secondary'
+  if (drive.is_ended) return 'bg-dark'
+  return 'bg-success'
 }
 
 const openDriveModal = (id) => {

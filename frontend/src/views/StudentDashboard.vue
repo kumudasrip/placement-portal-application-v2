@@ -11,15 +11,20 @@
       <div class="col-md-6">
         <h4>Available Drives</h4>
         <table class="table table-bordered table-sm">
-          <thead><tr><th>Title</th><th>Company</th><th>Deadline</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Title</th><th>Company</th><th>Status</th><th>Deadline</th><th>Actions</th></tr></thead>
           <tbody>
             <tr v-for="d in drives" :key="d.id">
               <td>{{ d.title }}</td>
               <td>{{ d.company }}</td>
+              <td>
+                <span class="badge" :class="getDriveStatusBadgeClass(d)">{{ getDriveStatusLabel(d) }}</span>
+              </td>
               <td>{{ d.deadline }}</td>
               <td class="text-nowrap">
                 <div class="btn-group" role="group">
-                  <button class="btn btn-primary btn-sm" @click="applyDrive(d.id)">Apply</button>
+                  <button class="btn btn-primary btn-sm" @click="applyDrive(d.id)" :disabled="!d.can_apply">
+                    {{ d.can_apply ? 'Apply' : (d.is_closed ? 'Closed' : 'Drive Ended') }}
+                  </button>
                   <button class="btn btn-outline-secondary btn-sm" @click="openDriveModal(d.id)">View</button>
                 </div>
               </td>
@@ -99,6 +104,18 @@ const exportCSV = async () => {
   } catch (e) {
     error.value = e.response?.data?.msg || 'Failed to export.'
   }
+}
+
+const getDriveStatusLabel = (drive) => {
+  if (drive.is_closed) return 'Closed'
+  if (drive.is_ended) return 'Drive Ended'
+  return 'Open'
+}
+
+const getDriveStatusBadgeClass = (drive) => {
+  if (drive.is_closed) return 'bg-secondary'
+  if (drive.is_ended) return 'bg-dark'
+  return 'bg-success'
 }
 
 const openDriveModal = (id) => {

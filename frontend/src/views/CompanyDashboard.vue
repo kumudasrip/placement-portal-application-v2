@@ -85,15 +85,16 @@
             <tr v-for="d in drives" :key="d.id">
               <td>{{ d.job_title }}</td>
               <td>
-                <span class="badge" :class="d.status === 'approved' ? 'bg-success' : 'bg-warning'">
-                  {{ d.status }}
+                <span class="badge" :class="getDriveStatusBadgeClass(d)">
+                  {{ getDriveStatusLabel(d) }}
                 </span>
               </td>
               <td>{{ d.total_applicants }}</td>
               <td>{{ d.approved_applicants }}</td>
               <td>{{ d.application_deadline || 'N/A' }}</td>
               <td>
-                <button class="btn btn-info btn-sm" @click="viewApplications(d.id)">View</button>
+                <button class="btn btn-info btn-sm me-1" @click="viewApplications(d.id)">View</button>
+                <button v-if="d.status === 'approved' && !isPastDeadline(d.application_deadline)" class="btn btn-outline-danger btn-sm" @click="closeDrive(d.id)">Close</button>
               </td>
             </tr>
           </tbody>
@@ -265,6 +266,42 @@ const viewApplications = async (driveId) => {
   const drive = drives.value.find(d => d.id === driveId)
   selectedDriveTitle.value = drive ? drive.job_title : ''
   applications.value = (await api.get(`/company/drives/${driveId}/applications`)).data
+}
+
+const isPastDeadline = (deadline) => {
+  if (!deadline) return false
+  const [year, month, day] = deadline.split('-').map(Number)
+  const deadlineDate = new Date(year, month - 1, day)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  deadlineDate.setHours(0, 0, 0, 0)
+  return deadlineDate < today
+}
+
+const getDriveStatusLabel = (drive) => {
+  if (drive.status === 'closed') return 'Closed'
+  if (isPastDeadline(drive.application_deadline)) return 'Drive Ended'
+  if (drive.status === 'pending') return 'Pending Approval'
+  return 'Open'
+}
+
+const getDriveStatusBadgeClass = (drive) => {
+  if (drive.status === 'closed') return 'bg-secondary'
+  if (isPastDeadline(drive.application_deadline)) return 'bg-dark'
+  if (drive.status === 'pending') return 'bg-warning'
+  return 'bg-success'
+}
+
+const closeDrive = async (driveId) => {
+  try {
+    await api.put(`/company/drives/${driveId}/status`, { status: 'closed' })
+    success.value = 'Drive closed successfully.'
+    await fetchDashboard()
+    setTimeout(() => { success.value = '' }, 3000)
+  } catch (e) {
+    error.value = e.response?.data?.msg || 'Failed to close drive.'
+    setTimeout(() => { error.value = '' }, 3000)
+  }
 }
 
 const openStatusModal = (appId, status, studentName) => {

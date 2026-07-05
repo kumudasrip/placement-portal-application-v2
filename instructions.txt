@@ -28,13 +28,12 @@ python app.py
 CMD 4: CELERY WORKER (Leave running)
 cd backend
 venv\Scripts\activate.bat
-celery -A celery_worker worker --pool=solo --loglevel=info
+python -m celery -A celery_worker worker --pool=solo --loglevel=info
 
 CMD 5: CELERY BEAT (Leave running)
 cd backend
 venv\Scripts\activate.bat
-celery -A app.celery beat --loglevel=info
-
+python -m celery -A app.celery beat --loglevel=info
 
 CMD 6: FRONTEND VUE APP (Leave running)
 cd frontend

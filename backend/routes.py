@@ -816,6 +816,32 @@ def register_routes(app, db, jwt, mail, cache, celery):
         drives = PlacementDrive.query.filter_by(company_id=company.id).all()
         return jsonify([{'id': d.id, 'title': d.job_title, 'status': d.status} for d in drives])
 
+    def get_drive_access_state(drive, now=None):
+        current_time = now or datetime.utcnow()
+        if drive.status == 'closed':
+            return {
+                'status': 'closed',
+                'status_label': 'Closed',
+                'is_closed': True,
+                'is_ended': False,
+                'can_apply': False
+            }
+        if drive.application_deadline and drive.application_deadline < current_time:
+            return {
+                'status': 'ended',
+                'status_label': 'Drive Ended',
+                'is_closed': False,
+                'is_ended': True,
+                'can_apply': False
+            }
+        return {
+            'status': 'open',
+            'status_label': 'Open',
+            'is_closed': False,
+            'is_ended': False,
+            'can_apply': True
+        }
+
     @app.route('/api/company/drives/<int:drive_id>/status', methods=['PUT'])
     @jwt_required()
     def company_update_drive_status(drive_id):
@@ -824,14 +850,16 @@ def register_routes(app, db, jwt, mail, cache, celery):
         drive = PlacementDrive.query.get_or_404(drive_id)
         if drive.company.user_id != get_user_id():
             return jsonify({'msg': 'Unauthorized'}), 403
-        data = request.json
+        data = request.json or {}
         new_status = data.get('status')
         if new_status not in ['active', 'closed']:
             return jsonify({'msg': 'Invalid status. Use "active" or "closed"'}), 400
-        if new_status == 'active':
-            drive.status = 'approved'
-        else:
+        if new_status == 'closed':
+            if drive.application_deadline and drive.application_deadline < datetime.utcnow():
+                return jsonify({'msg': 'Cannot close a drive after its deadline has passed'}), 400
             drive.status = 'closed'
+        else:
+            drive.status = 'approved'
         
         db.session.commit()
         cache.clear()
@@ -954,10 +982,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
         student = Student.query.filter_by(user_id=get_user_id()).first()
         search = request.args.get('search', '').strip()
         eligible_only = request.args.get('eligible_only', 'false').lower() in ('1', 'true', 'yes')
-        query = PlacementDrive.query.filter(
-            (PlacementDrive.status == 'approved') &
-            ((PlacementDrive.application_deadline == None) | (PlacementDrive.application_deadline >= datetime.utcnow()))
-        ).join(Company)
+        query = PlacementDrive.query.filter(PlacementDrive.status.in_(['approved', 'closed'])).join(Company)
 
         if search:
             like = f'%{search}%'
@@ -973,6 +998,7 @@ def register_routes(app, db, jwt, mail, cache, celery):
             eligibility = get_drive_eligibility(student, d)
             if eligible_only and not eligibility['eligible']:
                 continue
+            access_state = get_drive_access_state(d)
             drive_list.append({
                 'id': d.id,
                 'title': d.job_title,
@@ -982,7 +1008,11 @@ def register_routes(app, db, jwt, mail, cache, celery):
                 'salary': d.salary,
                 'location': d.location,
                 'eligible': eligibility['eligible'],
-                'eligibility_reasons': eligibility['reasons']
+                'eligibility_reasons': eligibility['reasons'],
+                'is_closed': access_state['is_closed'],
+                'is_ended': access_state['is_ended'],
+                'can_apply': access_state['can_apply'],
+                'status_label': access_state['status_label']
             })
         return jsonify(drive_list)
 
@@ -1022,17 +1052,23 @@ def register_routes(app, db, jwt, mail, cache, celery):
         
         drives = PlacementDrive.query.filter(
             (PlacementDrive.company_id == company.id) &
-            (PlacementDrive.status == 'approved') &
-            (PlacementDrive.application_deadline >= datetime.utcnow())
+            PlacementDrive.status.in_(['approved', 'closed'])
         ).all()
         
-        drives_data = [{
-            'id': d.id,
-            'job_title': d.job_title,
-            'salary': d.salary,
-            'location': d.location,
-            'deadline': d.application_deadline.strftime('%Y-%m-%d') if d.application_deadline else None
-        } for d in drives]
+        drives_data = []
+        for d in drives:
+            access_state = get_drive_access_state(d)
+            drives_data.append({
+                'id': d.id,
+                'job_title': d.job_title,
+                'salary': d.salary,
+                'location': d.location,
+                'deadline': d.application_deadline.strftime('%Y-%m-%d') if d.application_deadline else None,
+                'status_label': access_state['status_label'],
+                'can_apply': access_state['can_apply'],
+                'is_closed': access_state['is_closed'],
+                'is_ended': access_state['is_ended']
+            })
         return jsonify({
             'id': company.id,
             'name': company.name,
@@ -1056,11 +1092,12 @@ def register_routes(app, db, jwt, mail, cache, celery):
         if get_role() != 'student':
             return jsonify({'msg': 'Unauthorized'}), 403
         drive = PlacementDrive.query.get_or_404(drive_id)
-        if drive.status != 'approved':
+        if drive.status not in ['approved', 'closed']:
             return jsonify({'msg': 'Drive not available'}), 403
 
         student = Student.query.filter_by(user_id=get_user_id()).first()
         eligibility = get_drive_eligibility(student, drive)
+        access_state = get_drive_access_state(drive)
         return jsonify({
             'id': drive.id,
             'job_title': drive.job_title,
@@ -1078,6 +1115,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
             'num_positions': drive.num_positions,
             'application_deadline': drive.application_deadline.strftime('%Y-%m-%d') if drive.application_deadline else None,
             'status': drive.status,
+            'status_label': access_state['status_label'],
+            'is_closed': access_state['is_closed'],
+            'is_ended': access_state['is_ended'],
+            'can_apply': access_state['can_apply'],
             'created_at': drive.created_at.strftime('%Y-%m-%d'),
             'eligible': eligibility['eligible'],
             'eligibility_reasons': eligibility['reasons']
@@ -1092,9 +1133,10 @@ def register_routes(app, db, jwt, mail, cache, celery):
         drive = PlacementDrive.query.get_or_404(drive_id)
         if Application.query.filter_by(student_id=student.id, drive_id=drive.id).first():
             return jsonify({'msg': 'Already applied'}), 400
-        if drive.status != 'approved':
-            return jsonify({'msg': 'Drive not available'}), 403
-        if drive.application_deadline and drive.application_deadline < datetime.utcnow():
+        access_state = get_drive_access_state(drive)
+        if not access_state['can_apply']:
+            if access_state['is_closed']:
+                return jsonify({'msg': 'This drive has been closed'}), 400
             return jsonify({'msg': 'Application deadline has passed'}), 400
         eligibility = get_drive_eligibility(student, drive)
         if not eligibility['eligible']:

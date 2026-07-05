@@ -22,7 +22,7 @@
             <div class="col-md-6">
               <p><strong>Location:</strong> {{ drive.location || 'N/A' }}</p>
               <p><strong>Positions:</strong> {{ drive.num_positions }}</p>
-              <p><strong>Status:</strong> <span class="badge bg-info">{{ drive.status }}</span></p>
+              <p><strong>Status:</strong> <span class="badge" :class="drive.is_closed ? 'bg-secondary' : (drive.is_ended ? 'bg-dark' : 'bg-info')">{{ drive.status_label || drive.status }}</span></p>
               <p><strong>Deadline:</strong> {{ drive.application_deadline || 'N/A' }}</p>
             </div>
           </div>
