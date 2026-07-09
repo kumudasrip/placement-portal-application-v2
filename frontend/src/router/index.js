@@ -19,8 +19,6 @@ const routes = [
   { path: '/student/history', name: 'StudentHistory', component: StudentHistory },
   { path: '/student/edit-profile', name: 'StudentProfileEdit', component: StudentProfileEdit },
   { path: '/student/search', name: 'StudentSearchDashboard', component: StudentSearchDashboard },
-  { path: '/student/placements', redirect: '/student' },
-  { path: '/student/interviews', redirect: '/student' },
 ]
 
 const router = createRouter({
