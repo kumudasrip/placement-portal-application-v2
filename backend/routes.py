@@ -1476,7 +1476,7 @@ You can now:
 - Schedule interviews
 - Confirm placements
 
-Portal URL: {request.host_url}
+Portal URL: http://localhost:5173
 Your Account: {to}
 
 Thank you for registering with our Placement Portal.

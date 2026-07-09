@@ -27,11 +27,11 @@ celery.conf.update(
     beat_schedule={
         "send-monthly-placement-report": {
             "task": "send_monthly_placement_report",
-            "schedule": crontab(day_of_month=1, hour=0, minute=0),
+            "schedule": crontab(day_of_month=1, hour=3, minute=30),
         },
         "send-daily-visit-reminders": {
             "task": "send_visit_reminders",
-            "schedule": crontab(hour=9, minute=0),
+            "schedule": crontab(hour=3, minute=30),
         },
     },
 )
